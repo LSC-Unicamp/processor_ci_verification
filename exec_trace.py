@@ -23,24 +23,7 @@ import elf_reader
 ###############################################################################
 
 # Global trace variables
-fetches = []
-regfile_commits = []
-memory = []
-
-async def memory_model(dut):
-    global memory
-    
-    filename = os.environ.get("ELF")
-    memory = elf_reader.load_memory(filename)
-    # Append end of simulation condition:
-    memory.append(0x000402B7)  #li   t0, 0x3FFFC    # address of last word
-    memory.append(0xFFC28293)  #li   t0, 0x3FFFC    # address of last word
-    memory.append(0xDEADC337)  #li   t1, 0xDEADBEEF # exit code / magic value
-    memory.append(0xEEF30313)  #li   t1, 0xDEADBEEF # exit code / magic value
-    memory.append(0x0062A023)  #sw   t1, 0(t0)
-    for _ in range(len(memory), 65536):
-        memory.append(0)
-
+async def memory_model(dut, memory, fetches):
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -110,10 +93,11 @@ def resolve_path(dut, path: str):
 
 @cocotb.test()
 async def execution_trace(dut):
-
-    processor_name = os.environ.get("PROC_NAME")
-
+    fetches = []
+    regfile_commits = []
+    
     # Initialize and reset core
+    processor_name = os.environ.get("PROC_NAME")
     dut._log.info(f"Initializing trace execution for {processor_name}...")
 
     cocotb.start_soon(Clock(dut.sys_clk, 1, units="ns").start())
@@ -122,8 +106,18 @@ async def execution_trace(dut):
     dut.rst_n.value = 0
     await wait_cycles(dut.sys_clk, 5)
 
-    # only start memory at middle of reset so there will be no xxxxx at the data_out port
-    cocotb.start_soon(memory_model(dut))
+    # Initialize memory from ELF
+    filename = os.environ.get("ELF")
+    memory = elf_reader.load_memory(filename)
+    # Append end of simulation condition:
+    memory.append(0x000402B7)  #li   t0, 0x3FFFC    
+    memory.append(0xFFC28293)  #li   t0, 0x3FFFC    
+    memory.append(0xDEADC337)  #li   t1, 0xDEADBEEF 
+    memory.append(0xEEF30313)  #li   t1, 0xDEADBEEF
+    memory.append(0x0062A023)  #sw   t1, 0(t0)
+    for _ in range(len(memory), 65536):
+        memory.append(0)
+    cocotb.start_soon(memory_model(dut, memory, fetches)) # only start memory at middle of reset so there will be no xxxxx at the data_out port
     await wait_cycles(dut.sys_clk, 5)
 
     dut.rst_n.value = 1
@@ -163,11 +157,14 @@ async def execution_trace(dut):
 
     # finished simulation, write trace to file
     src_path = os.getenv("SRCPATH")
-    # Remove trailing slash if present, then get the basename (directory name)
     processor_name = os.path.basename(src_path.rstrip('/'))
+
     output_dir = os.environ.get("OUTPUT_DIR")
     os.makedirs(output_dir, exist_ok=True)
-    trace_file_path = os.path.join(output_dir, f"{processor_name}.trace")
+
+    elf_basename = os.path.basename(os.environ.get('ELF'))
+    elf_name_without_ext = os.path.splitext(elf_basename)[0]
+    trace_file_path = os.path.join(output_dir, f"{elf_name_without_ext}.trace")
     with open(trace_file_path, "w") as trace_file:
         program_name = os.path.basename(os.environ.get("ELF"))
         trace_file.write(f"# Trace for {program_name} on {processor_name}\n")
@@ -199,7 +196,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a ELF binary and collect the execution trace.")
     parser.add_argument("--makefile","-m", required=True, type=str, help="Path to the makefile to use.")
     parser.add_argument("--src_path","-s", required=True, type=str, help="Path to the processor repository.")
-    parser.add_argument("--elf_file","-e", required=True, type=str, help="Path to the ELF file to execute.")
+    
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--elf_file", "-e", type=str, help="Path to a single ELF file to execute.")
+    group.add_argument("--elf_folder", "-E", type=str, help="Path to a folder containing ELF files to execute.")
+    
     parser.add_argument("--reg_file","-r", required=True, type=str, help="Path to the reference register trace file.")
     parser.add_argument("--output_dir","-o", required=True, type=str, help="Directory to store the trace files.")
 
@@ -207,30 +208,55 @@ if __name__ == "__main__":
     makefile = args.makefile
     src_path = args.src_path
     elf_file = args.elf_file
+    elf_folder = args.elf_folder
     reg_file = args.reg_file
     output_dir = args.output_dir
 
     # make sure make command will have access to the cocotb_verification files even if called from another directory
     exec_trace_path = os.path.abspath(os.path.join(os.path.dirname(__file__)))
-    clean_command = f"make -f {makefile} clean"
-    # SRC_PATH is used in the makefile. Should we remove this and use hard-coded paths?
-    bash_command = f"""PYTHONPATH={exec_trace_path} \\
-make -f {makefile} \\
-MODULE=exec_trace \\
-ELF={elf_file} \\
-SRCPATH={src_path} \\
-REGFILE={args.reg_file} \\
-OUTPUT_DIR={output_dir}"""
-    print("Running command:")
-    print(bash_command)
-    bash_command = f"{clean_command} && {bash_command}"
+    
+    # Prepare environment variables
+    env = os.environ.copy()
+    env['PYTHONPATH'] = exec_trace_path
+    env['MODULE'] = 'exec_trace'
+    env['SRCPATH'] = src_path
+    env['REGFILE'] = args.reg_file
+    env['OUTPUT_DIR'] = output_dir
+    
+    clean_command = ["make", "-f", makefile, "clean"]
+    subprocess.run(clean_command, check=True, env=env)
+
+    make_command = ["make", "-f", makefile, "regression"]
     try:
-        result = subprocess.run(bash_command, shell=True, check=True, executable="/bin/bash", 
-                               capture_output=True, text=True)
-        print("STDOUT:")
-        print(result.stdout)
-        print("STDERR:")
-        print(result.stderr)
+        if args.elf_folder:
+            for test_file in os.listdir(elf_folder):
+                elf_file = os.path.join(elf_folder, test_file)
+                if os.path.isfile(elf_file) and elf_file.endswith(".elf"):  
+                    # Set ELF file in environment
+                    env['ELF'] = elf_file
+                    
+                    # Run make command
+                    result = subprocess.run(make_command, check=True, env=env,
+                                            capture_output=True, text=True)
+                    # print("STDOUT:")
+                    # print(result.stdout)
+                    # print("STDERR:")
+                    # print(result.stderr)
+                    print(f"Processed {os.path.basename(elf_file)}")
+        else:
+            # Set ELF file in environment
+            env['ELF'] = elf_file
+            
+            # Run clean command first
+            subprocess.run(clean_command, check=True, env=env)
+            
+            # Run make command
+            result = subprocess.run(make_command, check=True, env=env,
+                                    capture_output=True, text=True)
+            print("STDOUT:")
+            print(result.stdout)
+            print("STDERR:")
+            print(result.stderr)
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while running bash command: {e}")
         print("STDOUT:")
