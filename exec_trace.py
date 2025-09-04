@@ -3,7 +3,7 @@ from cocotb.triggers import Timer, RisingEdge, ReadOnly, ReadWrite
 from cocotb.clock import Clock
 from cocotb.binary import BinaryValue
 
-import os
+import os, time
 import json
 import argparse
 import subprocess
@@ -63,7 +63,7 @@ async def memory_model(dut, memory, fetches, mem_access):
                     write_value = (memory[simulated_addr] & 0x00FFFFFF) | (dut.core_data_out.value.integer & 0xFF000000)
                     memory[simulated_addr] = write_value
 
-                mem_access.append((simulated_addr, write_value))
+                mem_access.append((raw_addr, write_value))
 
             dut.core_ack.value = 1
         else:
@@ -212,7 +212,7 @@ if __name__ == "__main__":
     group.add_argument("--elf_file", "-e", type=str, help="Path to a single ELF file to execute.")
     group.add_argument("--elf_folder", "-E", type=str, help="Path to a folder containing ELF files to execute.")
     
-    parser.add_argument("--reg_file","-r", required=True, type=str, help="Path to the reference register trace file.")
+    parser.add_argument("--reg_file","-r", required=True, type=str, help="Cocotb path to the register trace file.")
     parser.add_argument("--output_dir","-o", required=True, type=str, help="Directory to store the trace files.")
 
     args = parser.parse_args()
@@ -234,28 +234,28 @@ if __name__ == "__main__":
     env['REGFILE'] = args.reg_file
     env['OUTPUT_DIR'] = output_dir
     
+    # Force colored output for tools that support it
+    env['FORCE_COLOR'] = '1'
+    env['CLICOLOR_FORCE'] = '1'
+    env['TERM'] = 'xterm-256color'
+    
     clean_command = ["make", "-f", makefile, "clean"]
     subprocess.run(clean_command, check=True, env=env)
 
-    make_command = ["make", "-f", makefile, "regression"] # -B forces simulation
+    make_command = ["make", "-f", makefile]
     try:
         if args.elf_folder:
             for test_file in os.listdir(elf_folder):
                 elf_file = os.path.join(elf_folder, test_file)
                 if os.path.isfile(elf_file) and elf_file.endswith(".elf"):  
                     # Set ELF file in environment
+                    # gambiarra, força a data do arquivo para disparar o make
+                    os.utime(elf_file, (time.time(), time.time()))
                     env['ELF'] = elf_file
                     
-                    # Run make command
-                    result = subprocess.run(make_command, check=True, env=env,
-                                            capture_output=True, text=True)
-                    print("STDOUT:")
-                    print(result.stdout)
-                    # with open("log.txt", "w") as log_file:
-                    #     log_file.write(result.stdout)
-                    print("STDERR:")
-                    print(result.stderr)
-                    print(f"Processed {os.path.basename(elf_file)}")
+                    # Run make command with real-time colored output
+                    result = subprocess.run(make_command, check=True, env=env)
+                    print(f"\033[96mProcessed {os.path.basename(elf_file)}\033[0m" + "\n")
         else:
             # Set ELF file in environment
             env['ELF'] = elf_file
@@ -263,13 +263,8 @@ if __name__ == "__main__":
             # Run clean command first
             subprocess.run(clean_command, check=True, env=env)
             
-            # Run make command
-            result = subprocess.run(make_command, check=True, env=env,
-                                    capture_output=True, text=True)
-            print("STDOUT:")
-            print(result.stdout)
-            print("STDERR:")
-            print(result.stderr)
+            # Run make command with real-time colored output
+            result = subprocess.run(make_command, check=True, env=env)
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while running bash command: {e}")
         print("STDOUT:")
