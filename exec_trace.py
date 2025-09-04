@@ -22,8 +22,8 @@ import elf_reader
 # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
 ###############################################################################
 
-# Global trace variables
-async def memory_model(dut, memory, fetches):
+
+async def memory_model(dut, memory, fetches, mem_access):
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -42,19 +42,28 @@ async def memory_model(dut, memory, fetches):
             else:
                 # Write operation
                 if dut.core_wstrb.value == "1111":
-                    memory[simulated_addr] = dut.core_data_out.value.integer
+                    write_value = dut.core_data_out.value.integer
+                    memory[simulated_addr] = write_value
                 elif dut.core_wstrb.value == "0011":
-                    memory[simulated_addr] = (memory[simulated_addr] & 0xFFFF0000) | (dut.core_data_out.value.integer & 0x0000FFFF)
+                    write_value = (memory[simulated_addr] & 0xFFFF0000) | (dut.core_data_out.value.integer & 0x0000FFFF)
+                    memory[simulated_addr] = write_value
                 elif dut.core_wstrb.value == "1100":
-                    memory[simulated_addr] = (memory[simulated_addr] & 0x0000FFFF) | (dut.core_data_out.value.integer & 0xFFFF0000)
+                    write_value = (memory[simulated_addr] & 0x0000FFFF) | (dut.core_data_out.value.integer & 0xFFFF0000)
+                    memory[simulated_addr] = write_value
                 elif dut.core_wstrb.value == "0001":
-                    memory[simulated_addr] = (memory[simulated_addr] & 0xFFFFFF00) | (dut.core_data_out.value.integer & 0x000000FF)
+                    write_value = (memory[simulated_addr] & 0xFFFFFF00) | (dut.core_data_out.value.integer & 0x000000FF)
+                    memory[simulated_addr] = write_value
                 elif dut.core_wstrb.value == "0010":
-                    memory[simulated_addr] = (memory[simulated_addr] & 0xFFFF00FF) | (dut.core_data_out.value.integer & 0x0000FF00)
+                    write_value = (memory[simulated_addr] & 0xFFFF00FF) | (dut.core_data_out.value.integer & 0x0000FF00)
+                    memory[simulated_addr] = write_value
                 elif dut.core_wstrb.value == "0100":
-                    memory[simulated_addr] = (memory[simulated_addr] & 0xFF00FFFF) | (dut.core_data_out.value.integer & 0x00FF0000)
+                    write_value = (memory[simulated_addr] & 0xFF00FFFF) | (dut.core_data_out.value.integer & 0x00FF0000)
+                    memory[simulated_addr] = write_value
                 elif dut.core_wstrb.value == "1000":
-                    memory[simulated_addr] = (memory[simulated_addr] & 0x00FFFFFF) | (dut.core_data_out.value.integer & 0xFF000000)
+                    write_value = (memory[simulated_addr] & 0x00FFFFFF) | (dut.core_data_out.value.integer & 0xFF000000)
+                    memory[simulated_addr] = write_value
+
+                mem_access.append((simulated_addr, write_value))
 
             dut.core_ack.value = 1
         else:
@@ -95,7 +104,8 @@ def resolve_path(dut, path: str):
 async def execution_trace(dut):
     fetches = []
     regfile_commits = []
-    
+    mem_access = []
+
     # Initialize and reset core
     processor_name = os.environ.get("PROC_NAME")
     dut._log.info(f"Initializing trace execution for {processor_name}...")
@@ -117,7 +127,7 @@ async def execution_trace(dut):
     memory.append(0x0062A023)  #sw   t1, 0(t0)
     for _ in range(len(memory), 65536):
         memory.append(0)
-    cocotb.start_soon(memory_model(dut, memory, fetches)) # only start memory at middle of reset so there will be no xxxxx at the data_out port
+    cocotb.start_soon(memory_model(dut, memory, fetches, mem_access)) # only start memory at middle of reset so there will be no xxxxx at the data_out port
     await wait_cycles(dut.sys_clk, 5)
 
     dut.rst_n.value = 1
@@ -170,7 +180,8 @@ async def execution_trace(dut):
         trace_file.write(f"# Trace for {program_name} on {processor_name}\n")
         trace_data = {
             "fetches": fetches,
-            "regfile_commits": regfile_commits
+            "regfile_commits": regfile_commits,
+            "memory_accesses": mem_access
         }
     
         json_str = json.dumps(trace_data, indent=1, separators=(',', ': '))
@@ -226,7 +237,7 @@ if __name__ == "__main__":
     clean_command = ["make", "-f", makefile, "clean"]
     subprocess.run(clean_command, check=True, env=env)
 
-    make_command = ["make", "-f", makefile, "regression"]
+    make_command = ["make", "-f", makefile, "regression"] # -B forces simulation
     try:
         if args.elf_folder:
             for test_file in os.listdir(elf_folder):
@@ -238,10 +249,12 @@ if __name__ == "__main__":
                     # Run make command
                     result = subprocess.run(make_command, check=True, env=env,
                                             capture_output=True, text=True)
-                    # print("STDOUT:")
-                    # print(result.stdout)
-                    # print("STDERR:")
-                    # print(result.stderr)
+                    print("STDOUT:")
+                    print(result.stdout)
+                    # with open("log.txt", "w") as log_file:
+                    #     log_file.write(result.stdout)
+                    print("STDERR:")
+                    print(result.stderr)
                     print(f"Processed {os.path.basename(elf_file)}")
         else:
             # Set ELF file in environment
