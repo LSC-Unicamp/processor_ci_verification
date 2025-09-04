@@ -37,6 +37,7 @@ async def memory_model(dut, memory, fetches, mem_access):
                 dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
                 
                 # instructions are only valid when reset is not active
+                # program is located at the beginning of memory, less than 50 words
                 if dut.rst_n.value == 1 and raw_addr < 50:
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
@@ -120,11 +121,7 @@ async def execution_trace(dut):
     filename = os.environ.get("ELF")
     memory = elf_reader.load_memory(filename)
     # Append end of simulation condition:
-    memory.append(0x000402B7)  #li   t0, 0x3FFFC    
-    memory.append(0xFFC28293)  #li   t0, 0x3FFFC    
-    memory.append(0xDEADC337)  #li   t1, 0xDEADBEEF 
-    memory.append(0xEEF30313)  #li   t1, 0xDEADBEEF
-    memory.append(0x0062A023)  #sw   t1, 0(t0)
+    memory.append(19081998)    
     for _ in range(len(memory), 65536):
         memory.append(0)
     cocotb.start_soon(memory_model(dut, memory, fetches, mem_access)) # only start memory at middle of reset so there will be no xxxxx at the data_out port
@@ -160,7 +157,7 @@ async def execution_trace(dut):
         for i in available_regs:
             if reg_file[i].value != old_regfile[i]:
                 regfile_commits.append((i, reg_file[i].value.integer))
-        if memory[65535] == 0xDEADBEEF:
+        if fetches and fetches[-1][1] == 19081998:
             dut._log.info("End of program detected via magic value in memory. Stopping simulation.")
             break
 
@@ -240,11 +237,11 @@ if __name__ == "__main__":
     env['TERM'] = 'xterm-256color'
     
     clean_command = ["make", "-f", makefile, "clean"]
-    subprocess.run(clean_command, check=True, env=env)
 
     make_command = ["make", "-f", makefile]
     try:
         if args.elf_folder:
+            subprocess.run(clean_command, check=True, env=env)
             for test_file in os.listdir(elf_folder):
                 elf_file = os.path.join(elf_folder, test_file)
                 if os.path.isfile(elf_file) and elf_file.endswith(".elf"):  
@@ -253,7 +250,7 @@ if __name__ == "__main__":
                     os.utime(elf_file, (time.time(), time.time()))
                     env['ELF'] = elf_file
                     
-                    # Run make command with real-time colored output
+                    # Run make commands
                     result = subprocess.run(make_command, check=True, env=env)
                     print(f"\033[96mProcessed {os.path.basename(elf_file)}\033[0m" + "\n")
         else:
