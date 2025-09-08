@@ -1,0 +1,3 @@
+[submodule "riscv-isa-sim_gabpgomes"]
+	path = riscv-isa-sim_gabpgomes
+	url = https://github.com/GabPGomes/riscv-isa-sim_gabpgomes
