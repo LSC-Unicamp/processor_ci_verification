@@ -9,7 +9,7 @@ TraceWeaver:
 # How to use this Spike fork:
 - Changed bootrom from 0x0:0xFFF to 0x1000:0x1FFF
 
-`#define DEBUG_START 0x1000; #define DEBUG_END (0x2000 - 1)`
+`#define DEBUG_START 0x1000; #define DEBUG_SIZE 0x1000`
 
 - Changed reset vector to 0x0
 

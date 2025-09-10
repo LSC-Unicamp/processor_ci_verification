@@ -1,6 +1,13 @@
 from elftools.elf.elffile import ELFFile
 
 def load_memory(filename="program.elf"):
+    """
+    Load the memory contents from the .text section of an ELF file.
+    Args:
+        filename (str): Path to the ELF file.
+    Returns:
+        list: A list of integers representing the memory contents. Each word is 4 bytes.
+    """
     with open(filename, 'rb') as file:
         elffile = ELFFile(file)
 
