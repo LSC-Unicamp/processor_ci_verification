@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 
 def is_load_instruction(instruction):
     load_op_code = instruction & 0b1111111 == 0b0000011 # lb, lh, lw, lbu, lhu
@@ -196,8 +197,8 @@ def compare_traces(spike_trace, dut_final_trace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compare Spike and DUT traces")
     parser.add_argument("--spike-trace", "-s", type=str, required=True, help="Path to the Spike trace file")
-    parser.add_argument("--dut-trace", "-d", type=str, required=True, help="Path to the DUT trace file")
-    parser.add_argument("--output-trace", "-o", type=str, required=False, help="Path to save the generated DUT trace file")
+    parser.add_argument("--dut-trace", "-d", type=str, required=True, help="Path to the DUT's fragmented trace file")
+    parser.add_argument("--output-folder", "-o", type=str, required=False, help="Folder to save the final speculative DUT trace")
     args = parser.parse_args()
 
     with open(args.spike_trace, "r") as f:
@@ -206,7 +207,7 @@ if __name__ == "__main__":
         dut_trace = json.load(f)
     dut_final_trace = generate_final_trace(spike_trace, dut_trace)
 
-    with open(args.output_trace, "w") as f:
+    with open(f"{args.output_folder}/{os.path.splitext(os.path.basename(args.spike_trace))[0]}.final.json", "w") as f:
         json.dump(dut_final_trace, f, indent=2)
 
     mismatches = compare_traces(spike_trace, dut_final_trace)

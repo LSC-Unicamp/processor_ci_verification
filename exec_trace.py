@@ -171,7 +171,7 @@ async def execution_trace(dut):
 
     elf_basename = os.path.basename(os.environ.get('ELF'))
     elf_name_without_ext = os.path.splitext(elf_basename)[0]
-    trace_file_path = os.path.join(output_dir, f"{elf_name_without_ext}.{processor_name}.json")
+    trace_file_path = os.path.join(output_dir, f"{elf_name_without_ext}.fragmented.json")
     with open(trace_file_path, "w") as trace_file:
         program_name = os.path.basename(os.environ.get("ELF"))
         trace_data = {
