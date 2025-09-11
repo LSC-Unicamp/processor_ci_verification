@@ -201,13 +201,13 @@ if __name__ == "__main__":
     # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
     # ###############################################################################
 
-    parser = argparse.ArgumentParser(description="Run a ELF binary and collect the execution trace.")
+    parser = argparse.ArgumentParser(description="Run a ELF binaries and collect the fragmented execution trace.")
     parser.add_argument("--makefile","-m", required=True, type=str, help="Path to the makefile to use.")
-    parser.add_argument("--src_path","-s", required=True, type=str, help="Path to the processor repository.")
+    parser.add_argument("--src_path","-s", required=True, type=str, help="Path to the processor repository (used in the makefile).") # To be changed. Makefile should have absolute paths
     
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--elf_file", "-e", type=str, help="Path to a single ELF file to execute.")
-    group.add_argument("--elf_folder", "-E", type=str, help="Path to a folder containing ELF files to execute.")
+    group.add_argument("--elf_folder", "-E", type=str, help="Path to the folder containing ELF files to execute.")
     
     parser.add_argument("--reg_file","-r", required=True, type=str, help="Cocotb path to the register trace file.")
     parser.add_argument("--output_dir","-o", required=True, type=str, help="Directory to store the trace files.")

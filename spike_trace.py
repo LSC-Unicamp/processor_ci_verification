@@ -88,7 +88,7 @@ def parse_spike_trace(trace_file):
     return filtered_results
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate and parse Spike trace files.")
+    parser = argparse.ArgumentParser(description="Generate and parse Spike trace files into a json format.")
     parser.add_argument("--elf_file", "-e", required=True, type=str, help="Path to the ELF file.")
     parser.add_argument("--output_dir", "-o", required=True, type=str, help="Directory to save the Spike trace files.")
     args = parser.parse_args()

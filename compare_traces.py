@@ -195,7 +195,7 @@ def compare_traces(spike_trace, dut_final_trace):
     return mismatches
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Compare Spike and DUT traces")
+    parser = argparse.ArgumentParser(description="Generate a final DUT trace and then compare it to spike's trace")
     parser.add_argument("--spike-trace", "-s", type=str, required=True, help="Path to the Spike trace file")
     parser.add_argument("--dut-trace", "-d", type=str, required=True, help="Path to the DUT's fragmented trace file")
     parser.add_argument("--output-folder", "-o", type=str, required=False, help="Folder to save the final speculative DUT trace")
@@ -212,9 +212,15 @@ if __name__ == "__main__":
 
     mismatches = compare_traces(spike_trace, dut_final_trace)
 
+    basename = os.path.basename(args.spike_trace)
+    elf_name = basename.split(".")[0]
+
     for mismatch in mismatches:
-        print("Mismatch found:")
+        print(f"\033[91mMismatch found for {elf_name}:\033[0m")
         print("Spike entry:\t", mismatch["spike"])
         print("DUT entry:\t", mismatch["dut"])
         print()
+    
+    if not mismatches:
+        print("\033[92mNo mismatches found for", elf_name, "\033[0m")
 
