@@ -96,5 +96,5 @@ if __name__ == "__main__":
     trace_file = generate_spike_trace(args.elf_file, args.output_dir)
     trace_dictionary = parse_spike_trace(trace_file)
 
-    with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.json"), "w") as f:
+    with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
         json.dump(trace_dictionary, f, indent=2)

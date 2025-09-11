@@ -171,11 +171,11 @@ async def execution_trace(dut):
 
     elf_basename = os.path.basename(os.environ.get('ELF'))
     elf_name_without_ext = os.path.splitext(elf_basename)[0]
-    trace_file_path = os.path.join(output_dir, f"{elf_name_without_ext}.trace")
+    trace_file_path = os.path.join(output_dir, f"{elf_name_without_ext}.{processor_name}.json")
     with open(trace_file_path, "w") as trace_file:
         program_name = os.path.basename(os.environ.get("ELF"))
-        trace_file.write(f"# Trace for {program_name} on {processor_name}\n")
         trace_data = {
+            "comment": f"Trace for {program_name} on {processor_name}",
             "fetches": fetches,
             "regfile_commits": regfile_commits,
             "memory_accesses": mem_access
