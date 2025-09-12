@@ -136,8 +136,9 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     break
                 
                 # Exract only the bytes that were actually stored (considering write strobe)
+                # Spike address points to the specific bytes to be stored
+                byte_shift = 8*(spike_entry["mem_addr"] & 0b11)
                 aux_dut_mem_val = dut_trace["memory_accesses"][memory_accesses_index][1]
-                byte_shift = 8*(dut_trace["memory_accesses"][memory_accesses_index][0] & 0b11)
                 if is_store_word_instruction(dut_trace["fetches"][fetches_index][1]):
                     aux_mem_val = (aux_dut_mem_val >> byte_shift)
                 elif is_store_half_instruction(dut_trace["fetches"][fetches_index][1]):
@@ -200,6 +201,38 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     fetches_index += 1
                     regfile_commits_index += 1
                     spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
+                    
+            elif is_jump_instruction(dut_trace["fetches"][fetches_index][1]):
+                if write_to_zero: # just the fetch
+                    dut_trace_final.append({
+                        "pc": dut_trace["fetches"][fetches_index][0],
+                        "instr": dut_trace["fetches"][fetches_index][1],
+                        "target_reg": None,
+                        "reg_val": None,
+                        "mem_addr": None,
+                        "mem_val": None,
+                        "speculative_fetch": False,
+                        "speculative_commit": speculative_commit
+                    })
+                    fetches_index += 1
+                else:
+                    if regfile_commits_index >= len(dut_trace["regfile_commits"]):
+                        print(f"{elf_name} trace ended before expected (out of regfile_commits).")
+                        break
+                    
+                    dut_trace_final.append({
+                        "pc": dut_trace["fetches"][fetches_index][0],
+                        "instr": dut_trace["fetches"][fetches_index][1],
+                        "target_reg": dut_trace["regfile_commits"][regfile_commits_index][0],
+                        "reg_val": dut_trace["regfile_commits"][regfile_commits_index][1],
+                        "mem_addr": None,
+                        "mem_val": None,
+                        "speculative_fetch": False,
+                        "speculative_commit": speculative_commit
+                    })
+                    fetches_index += 1
+                    regfile_commits_index += 1
+
             else:
                 print(f"Unknown instruction: {hex(dut_trace['fetches'][fetches_index][1])}.")
                 # ignore unknown instruction as a speculative fetch
