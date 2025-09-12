@@ -22,6 +22,74 @@ import elf_reader
 # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
 ###############################################################################
 
+async def instruction_memory_model(dut, memory, fetches):
+    while True:
+        await RisingEdge(dut.sys_clk)  
+        await ReadWrite() # wait for signals to propagate after the clock edge
+
+        if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
+            
+            raw_addr = dut.core_addr.value.integer
+            simulated_addr = (raw_addr // 4) % 65536
+
+            if dut.core_we == 0:
+                dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+                
+                # instructions are only valid when reset is not active
+                # program is located at the beginning of memory, less than 50 words
+                if dut.rst_n.value == 1:
+                    fetches.append((raw_addr, memory[simulated_addr]))
+            else:
+                write_value = dut.core_data_out.value.integer
+                memory[simulated_addr] = write_value
+                dut._log.info("Write to the instruction memory. Possible error.")
+  
+            dut.core_ack.value = 1
+        else:
+            dut.core_ack.value = 0
+
+async def data_memory_model(dut, memory, mem_access):
+    while True:
+        await RisingEdge(dut.sys_clk)  
+        await ReadWrite() # wait for signals to propagate after the clock edge
+
+        if dut.data_mem_cyc.value == 1 and dut.data_mem_stb.value == 1: # active transaction
+            
+            raw_addr = dut.data_mem_addr.value.integer
+            simulated_addr = (raw_addr // 4) % 65536
+
+            if dut.data_mem_we == 0:
+                dut.data_mem_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+                
+            else:
+                # Write operation, depends on write strobe
+                if dut.data_mem_wstrb.value == "1111":
+                    write_value = dut.data_mem_data_out.value.integer
+                    memory[simulated_addr] = write_value
+                elif dut.data_mem_wstrb.value == "0011":
+                    write_value = (memory[simulated_addr] & 0xFFFF0000) | (dut.data_mem_data_out.value.integer & 0x0000FFFF)
+                    memory[simulated_addr] = write_value
+                elif dut.data_mem_wstrb.value == "1100":
+                    write_value = (memory[simulated_addr] & 0x0000FFFF) | (dut.data_mem_data_out.value.integer & 0xFFFF0000)
+                    memory[simulated_addr] = write_value
+                elif dut.data_mem_wstrb.value == "0001":
+                    write_value = (memory[simulated_addr] & 0xFFFFFF00) | (dut.data_mem_data_out.value.integer & 0x000000FF)
+                    memory[simulated_addr] = write_value
+                elif dut.data_mem_wstrb.value == "0010":
+                    write_value = (memory[simulated_addr] & 0xFFFF00FF) | (dut.data_mem_data_out.value.integer & 0x0000FF00)
+                    memory[simulated_addr] = write_value
+                elif dut.data_mem_wstrb.value == "0100":
+                    write_value = (memory[simulated_addr] & 0xFF00FFFF) | (dut.data_mem_data_out.value.integer & 0x00FF0000)
+                    memory[simulated_addr] = write_value
+                elif dut.data_mem_wstrb.value == "1000":
+                    write_value = (memory[simulated_addr] & 0x00FFFFFF) | (dut.data_mem_data_out.value.integer & 0xFF000000)
+                    memory[simulated_addr] = write_value
+
+                mem_access.append((raw_addr, write_value))
+
+            dut.core_ack.value = 1
+        else:
+            dut.core_ack.value = 0
 
 async def memory_model(dut, memory, fetches, mem_access):
     while True:
@@ -71,14 +139,29 @@ async def memory_model(dut, memory, fetches, mem_access):
             dut.core_ack.value = 0
 
         
-def show_signals_of_interest(dut):
-    dut._log.info("CORE_STB=%s", dut.core_stb.value)
-    dut._log.info("CORE_ADDR=%x", dut.core_addr.value)
-    dut._log.info("CORE_DATA_IN=%x", dut.core_data_in.value)
-    dut._log.info("CORE_WE=%s", dut.core_we.value)
-    dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
-    dut._log.info("CORE_WSTRB=%s", dut.core_wstrb.value)
-    dut._log.info("")
+def show_signals_of_interest(dut, TWO_MEMORIES):
+    if TWO_MEMORIES:
+        dut._log.info("CORE_STB=%s", dut.core_stb.value)
+        dut._log.info("CORE_ADDR=%s", dut.core_addr.value)
+        dut._log.info("CORE_DATA_IN=%s", dut.core_data_in.value)
+        dut._log.info("CORE_WE=%s", dut.core_we.value)
+        dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
+        dut._log.info("DATA_MEM_CYC=%s", dut.data_mem_cyc.value)
+        dut._log.info("DATA_MEM_STB=%s", dut.data_mem_stb.value)
+        dut._log.info("DATA_MEM_ADDR=%s", dut.data_mem_addr.value)
+        dut._log.info("DATA_MEM_DATA_IN=%s", dut.data_mem_data_in.value)
+        dut._log.info("DATA_MEM_WE=%s", dut.data_mem_we.value)
+        dut._log.info("DATA_MEM_DATA_OUT=%s", dut.data_mem_data_out.value)
+        dut._log.info("DATA_MEM_WSTRB=%s", dut.data_mem_wstrb.value)
+        dut._log.info("")
+    else:
+        dut._log.info("CORE_STB=%s", dut.core_stb.value)
+        dut._log.info("CORE_ADDR=%s", dut.core_addr.value)
+        dut._log.info("CORE_DATA_IN=%s", dut.core_data_in.value)
+        dut._log.info("CORE_WE=%s", dut.core_we.value)
+        dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
+        dut._log.info("CORE_WSTRB=%s", dut.core_wstrb.value)
+        dut._log.info("")
 
 async def wait_cycles(signal, num_cycles):
     for _ in range(num_cycles):
@@ -103,6 +186,10 @@ def resolve_path(dut, path: str):
 
 @cocotb.test()
 async def execution_trace(dut):
+
+    ################################
+    TWO_MEMORIES = True
+    ################################
     fetches = []
     regfile_commits = []
     mem_access = []
@@ -117,14 +204,31 @@ async def execution_trace(dut):
     dut.rst_n.value = 0
     await wait_cycles(dut.sys_clk, 5)
 
-    # Initialize memory from ELF
-    filename = os.environ.get("ELF")
-    memory = elf_reader.load_memory(filename)
-    # Append end of simulation condition:
-    memory.append(19081998)    
-    for _ in range(len(memory), 65536):
-        memory.append(0)
-    cocotb.start_soon(memory_model(dut, memory, fetches, mem_access)) # only start memory at middle of reset so there will be no xxxxx at the data_out port
+    # start memory in the middle of reset to avoid xxxxx at data_out port
+    
+    if TWO_MEMORIES:
+        # Initialize instruction memory from ELF
+        filename = os.environ.get("ELF")
+        instruction_memory = elf_reader.load_memory(filename)
+        # Append end of simulation condition:
+        instruction_memory.append(19081998)    
+        for _ in range(len(instruction_memory), 65536):
+            instruction_memory.append(0x13) # NOP
+
+        data_memory = [0] * 65536  # Simple data memory initialized to zero
+
+        cocotb.start_soon(instruction_memory_model(dut, instruction_memory, fetches))
+        cocotb.start_soon(data_memory_model(dut, data_memory, mem_access))
+    else:
+        # Initialize memory from ELF
+        filename = os.environ.get("ELF")
+        memory = elf_reader.load_memory(filename)
+        # Append end of simulation condition:
+        memory.append(19081998)    
+        for _ in range(len(memory), 65536):
+            memory.append(0x13) # NOP 
+        cocotb.start_soon(memory_model(dut, memory, fetches, mem_access))
+
     await wait_cycles(dut.sys_clk, 5)
 
     dut.rst_n.value = 1
@@ -145,7 +249,7 @@ async def execution_trace(dut):
             continue
    # Main simulation loop
     for _ in range(100):
-        show_signals_of_interest(dut)
+        show_signals_of_interest(dut, TWO_MEMORIES)
         
         old_regfile = {}
         for i in available_regs:
@@ -158,7 +262,8 @@ async def execution_trace(dut):
             if reg_file[i].value != old_regfile[i]:
                 regfile_commits.append((i, reg_file[i].value.integer))
         if fetches and fetches[-1][1] == 19081998:
-            dut._log.info("End of program detected via magic value in memory. Stopping simulation.")
+            dut._log.info("End of program detected via magic value in memory. Stopping simulation after 10 cycles.")
+            await wait_cycles(dut.sys_clk, 10)
             break
 
 
