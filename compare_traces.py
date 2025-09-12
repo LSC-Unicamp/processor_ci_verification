@@ -6,9 +6,20 @@ def is_load_instruction(instruction):
     load_op_code = instruction & 0b1111111 == 0b0000011 # lb, lh, lw, lbu, lhu
     return load_op_code
     
-def is_store_instruction(instruction):
+def is_store_byte_instruction(instruction):
     store_op_code = instruction & 0b1111111 == 0b0100011 # sb, sh, sw
-    return store_op_code
+    store_func3 = (instruction >> 12) & 0b111 == 0b000
+    return store_op_code and store_func3
+
+def is_store_half_instruction(instruction):
+    store_op_code = instruction & 0b1111111 == 0b0100011 # sb, sh, sw
+    store_func3 = (instruction >> 12) & 0b111 == 0b001
+    return store_op_code and store_func3
+
+def is_store_word_instruction(instruction):
+    store_op_code = instruction & 0b1111111 == 0b0100011 # sb, sh, sw
+    store_func3 = (instruction >> 12) & 0b111 == 0b010
+    return store_op_code and store_func3
 
 def is_branch_instruction(instruction):
     branch_op_code = instruction & 0b1111111 == 0b1100011 # beq, bne, blt, bge, bltu, bgeu
@@ -116,18 +127,31 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     regfile_commits_index += 1
                     spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
 
-            elif is_store_instruction(dut_trace["fetches"][fetches_index][1]):
+            elif (is_store_byte_instruction(dut_trace["fetches"][fetches_index][1]) or
+                  is_store_half_instruction(dut_trace["fetches"][fetches_index][1]) or
+                  is_store_word_instruction(dut_trace["fetches"][fetches_index][1])):
+                
                 if memory_accesses_index >= len(dut_trace["memory_accesses"]):
                     print(f"{elf_name} trace ended before expected (out of memory accesses)")
                     break
                 
+                # Exract only the bytes that were actually stored (considering write strobe)
+                aux_dut_mem_val = dut_trace["memory_accesses"][memory_accesses_index][1]
+                byte_shift = 8*(dut_trace["memory_accesses"][memory_accesses_index][0] & 0b11)
+                if is_store_word_instruction(dut_trace["fetches"][fetches_index][1]):
+                    aux_mem_val = (aux_dut_mem_val >> byte_shift)
+                elif is_store_half_instruction(dut_trace["fetches"][fetches_index][1]):
+                    aux_mem_val = (aux_dut_mem_val >> byte_shift) & 0xFFFF
+                elif is_store_byte_instruction(dut_trace["fetches"][fetches_index][1]):
+                    aux_mem_val = (aux_dut_mem_val >> byte_shift) & 0xFF
+
                 dut_trace_final.append({
                     "pc": dut_trace["fetches"][fetches_index][0],
                     "instr": dut_trace["fetches"][fetches_index][1],
                     "target_reg": None,
                     "reg_val": None,
                     "mem_addr": dut_trace["memory_accesses"][memory_accesses_index][0],
-                    "mem_val": dut_trace["memory_accesses"][memory_accesses_index][1],
+                    "mem_val": aux_mem_val,
                     "speculative_fetch": False,
                     "speculative_commit": speculative_commit
                 })
