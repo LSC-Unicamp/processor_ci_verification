@@ -19,7 +19,7 @@ def generate_spike_trace(elf_file, output_dir):
     trace_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(elf_file))[0]}.trace")
     # For some reason, --instructions=<n> makes spike stop after the last instruction in the elf, even if less than <n>.
     # Do not use the -l option
-    command = f"spike --isa=rv32i --log-commits -m0x0:0x1000 --instructions=100 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
+    command = f"spike --isa=rv32i --log-commits -m0x0:0x1000 --instructions=20 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
     subprocess.run(command, shell=True, check=True)
 
     return trace_file
@@ -89,12 +89,25 @@ def parse_spike_trace(trace_file):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate and parse Spike trace files into a json format.")
-    parser.add_argument("--elf_file", "-e", required=True, type=str, help="Path to the ELF file.")
+    
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--elf_file", "-e", type=str, help="Path to a single ELF file to execute.")
+    group.add_argument("--elf_folder", "-E", type=str, help="Path to the folder containing ELF files to execute.")
+
     parser.add_argument("--output_dir", "-o", required=True, type=str, help="Directory to save the Spike trace files.")
     args = parser.parse_args()
 
-    trace_file = generate_spike_trace(args.elf_file, args.output_dir)
-    trace_dictionary = parse_spike_trace(trace_file)
+    if args.elf_folder:
+        for test_file in os.listdir(args.elf_folder):
+            if test_file.endswith(".elf"):
+                elf_path = os.path.join(args.elf_folder, test_file)
+                trace_file = generate_spike_trace(elf_path, args.output_dir)
+                trace_dictionary = parse_spike_trace(trace_file)
+                with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
+                    json.dump(trace_dictionary, f, indent=2)
+    else:
+        trace_file = generate_spike_trace(args.elf_file, args.output_dir)
+        trace_dictionary = parse_spike_trace(trace_file)
 
-    with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
-        json.dump(trace_dictionary, f, indent=2)
+        with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
+            json.dump(trace_dictionary, f, indent=2)

@@ -8,7 +8,7 @@ NTV is a verification tool that leverages simulation and trace comparison to ver
 There are two steps: generating the traces and then comparing them.
 1. First step needs the makefile(which points to files outside this repository), the ELF file, the Cocotb path to the register file and the output folder:
 ```
-$python3 exec_trace.py -m tmp/rvx/rvx.mk -o output -e tmp/000_addi.elf -s tmp/rvx/ -r Processor.integer_file
+python3 exec_trace.py -m tmp/rvx/rvx.mk -o output -e tmp/000_addi.elf -s tmp/rvx/ -r Processor.integer_file
 ```
 
 2. Second step is to generate the spike trace:

@@ -238,7 +238,7 @@ if __name__ == "__main__":
     
     clean_command = ["make", "-f", makefile, "clean"]
 
-    make_command = ["make", "-f", makefile]
+    make_command = ["make", "-f", makefile, "regression"]
     try:
         if args.elf_folder:
             subprocess.run(clean_command, check=True, env=env)
