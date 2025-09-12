@@ -235,6 +235,9 @@ if __name__ == "__main__":
             spike_trace = json.load(f)
         with open(args.dut_trace, "r") as f:
             dut_trace = json.load(f)
+
+        basename = os.path.basename(args.spike_trace)
+        elf_name = basename.split(".")[0]
         dut_final_trace = generate_final_trace(spike_trace, dut_trace, elf_name)
 
         basename = os.path.basename(args.spike_trace)
@@ -244,44 +247,43 @@ if __name__ == "__main__":
 
         mismatches = compare_traces(spike_trace, dut_final_trace, elf_name)
 
-        basename = os.path.basename(args.spike_trace)
-        elf_name = basename.split(".")[0]
-
-        for mismatch in mismatches:
-            print(f"\033[91mMismatch found for {elf_name}:\033[0m")
+        if mismatches:
+            print(f"\033[91mMismatches found for {elf_name}:\033[0m")
+            for mismatch in mismatches:
+                
+                # Format spike entry with hex values
+                spike_formatted = mismatch["spike"].copy()
+                if spike_formatted["pc"] is not None:
+                    spike_formatted["pc"] = f"0x{spike_formatted['pc']:08x}"
+                if spike_formatted["instr"] is not None:
+                    spike_formatted["instr"] = f"0x{spike_formatted['instr']:08x}"
+                if spike_formatted["reg_val"] is not None:
+                    spike_formatted["reg_val"] = f"0x{spike_formatted['reg_val']:08x}"
+                if spike_formatted["mem_addr"] is not None:
+                    spike_formatted["mem_addr"] = f"0x{spike_formatted['mem_addr']:08x}"
+                if spike_formatted["mem_val"] is not None:
+                    spike_formatted["mem_val"] = f"0x{spike_formatted['mem_val']:08x}"
+                
+                # Format DUT entry with hex values
+                dut_formatted = mismatch["dut"].copy()
+                if dut_formatted["pc"] is not None:
+                    dut_formatted["pc"] = f"0x{dut_formatted['pc']:08x}"
+                if dut_formatted["instr"] is not None:
+                    dut_formatted["instr"] = f"0x{dut_formatted['instr']:08x}"
+                if dut_formatted["reg_val"] is not None:
+                    dut_formatted["reg_val"] = f"0x{dut_formatted['reg_val']:08x}"
+                if dut_formatted["mem_addr"] is not None:
+                    dut_formatted["mem_addr"] = f"0x{dut_formatted['mem_addr']:08x}"
+                if dut_formatted["mem_val"] is not None:
+                    dut_formatted["mem_val"] = f"0x{dut_formatted['mem_val']:08x}"
+                
+                print("Spike entry:\t", spike_formatted)
+                print("DUT entry:\t", dut_formatted)
+                print()
             
-            # Format spike entry with hex values
-            spike_formatted = mismatch["spike"].copy()
-            if spike_formatted["pc"] is not None:
-                spike_formatted["pc"] = f"0x{spike_formatted['pc']:08x}"
-            if spike_formatted["instr"] is not None:
-                spike_formatted["instr"] = f"0x{spike_formatted['instr']:08x}"
-            if spike_formatted["reg_val"] is not None:
-                spike_formatted["reg_val"] = f"0x{spike_formatted['reg_val']:08x}"
-            if spike_formatted["mem_addr"] is not None:
-                spike_formatted["mem_addr"] = f"0x{spike_formatted['mem_addr']:08x}"
-            if spike_formatted["mem_val"] is not None:
-                spike_formatted["mem_val"] = f"0x{spike_formatted['mem_val']:08x}"
-            
-            # Format DUT entry with hex values
-            dut_formatted = mismatch["dut"].copy()
-            if dut_formatted["pc"] is not None:
-                dut_formatted["pc"] = f"0x{dut_formatted['pc']:08x}"
-            if dut_formatted["instr"] is not None:
-                dut_formatted["instr"] = f"0x{dut_formatted['instr']:08x}"
-            if dut_formatted["reg_val"] is not None:
-                dut_formatted["reg_val"] = f"0x{dut_formatted['reg_val']:08x}"
-            if dut_formatted["mem_addr"] is not None:
-                dut_formatted["mem_addr"] = f"0x{dut_formatted['mem_addr']:08x}"
-            if dut_formatted["mem_val"] is not None:
-                dut_formatted["mem_val"] = f"0x{dut_formatted['mem_val']:08x}"
-            
-            print("Spike entry:\t", spike_formatted)
-            print("DUT entry:\t", dut_formatted)
-            print()
-        
-        if not mismatches:
+        else:
             print("\033[92mNo mismatches found for", elf_name, "\033[0m")
+            
     else:
         for spike_file in sorted(os.listdir(args.spike_trace_dir)):
             if spike_file.endswith(".spike.json"):
@@ -301,39 +303,40 @@ if __name__ == "__main__":
 
                 mismatches = compare_traces(spike_trace, dut_final_trace, elf_name)
 
-                for mismatch in mismatches:
-                    print(f"\033[91mMismatch found for {elf_name}:\033[0m")
-                    
-                    # Format spike entry with hex values
-                    spike_formatted = mismatch["spike"].copy()
-                    if spike_formatted["pc"] is not None:
-                        spike_formatted["pc"] = f"0x{spike_formatted['pc']:08x}"
-                    if spike_formatted["instr"] is not None:
-                        spike_formatted["instr"] = f"0x{spike_formatted['instr']:08x}"
-                    if spike_formatted["reg_val"] is not None:
-                        spike_formatted["reg_val"] = f"0x{spike_formatted['reg_val']:08x}"
-                    if spike_formatted["mem_addr"] is not None:
-                        spike_formatted["mem_addr"] = f"0x{spike_formatted['mem_addr']:08x}"
-                    if spike_formatted["mem_val"] is not None:
-                        spike_formatted["mem_val"] = f"0x{spike_formatted['mem_val']:08x}"
-                    
-                    # Format DUT entry with hex values
-                    dut_formatted = mismatch["dut"].copy()
-                    if dut_formatted["pc"] is not None:
-                        dut_formatted["pc"] = f"0x{dut_formatted['pc']:08x}"
-                    if dut_formatted["instr"] is not None:
-                        dut_formatted["instr"] = f"0x{dut_formatted['instr']:08x}"
-                    if dut_formatted["reg_val"] is not None:
-                        dut_formatted["reg_val"] = f"0x{dut_formatted['reg_val']:08x}"
-                    if dut_formatted["mem_addr"] is not None:
-                        dut_formatted["mem_addr"] = f"0x{dut_formatted['mem_addr']:08x}"
-                    if dut_formatted["mem_val"] is not None:
-                        dut_formatted["mem_val"] = f"0x{dut_formatted['mem_val']:08x}"
-                    
-                    print("Spike entry:\t", spike_formatted)
-                    print("DUT entry:\t", dut_formatted)
-                    print()
+                if mismatches:
+                    print(f"\033[91mMismatches found for {elf_name}:\033[0m")
+                    for mismatch in mismatches:
+                        
+                        # Format spike entry with hex values
+                        spike_formatted = mismatch["spike"].copy()
+                        if spike_formatted["pc"] is not None:
+                            spike_formatted["pc"] = f"0x{spike_formatted['pc']:08x}"
+                        if spike_formatted["instr"] is not None:
+                            spike_formatted["instr"] = f"0x{spike_formatted['instr']:08x}"
+                        if spike_formatted["reg_val"] is not None:
+                            spike_formatted["reg_val"] = f"0x{spike_formatted['reg_val']:08x}"
+                        if spike_formatted["mem_addr"] is not None:
+                            spike_formatted["mem_addr"] = f"0x{spike_formatted['mem_addr']:08x}"
+                        if spike_formatted["mem_val"] is not None:
+                            spike_formatted["mem_val"] = f"0x{spike_formatted['mem_val']:08x}"
+                        
+                        # Format DUT entry with hex values
+                        dut_formatted = mismatch["dut"].copy()
+                        if dut_formatted["pc"] is not None:
+                            dut_formatted["pc"] = f"0x{dut_formatted['pc']:08x}"
+                        if dut_formatted["instr"] is not None:
+                            dut_formatted["instr"] = f"0x{dut_formatted['instr']:08x}"
+                        if dut_formatted["reg_val"] is not None:
+                            dut_formatted["reg_val"] = f"0x{dut_formatted['reg_val']:08x}"
+                        if dut_formatted["mem_addr"] is not None:
+                            dut_formatted["mem_addr"] = f"0x{dut_formatted['mem_addr']:08x}"
+                        if dut_formatted["mem_val"] is not None:
+                            dut_formatted["mem_val"] = f"0x{dut_formatted['mem_val']:08x}"
+                        
+                        print("Spike entry:\t", spike_formatted)
+                        print("DUT entry:\t", dut_formatted)
+                        print()
                 
-                if not mismatches:
+                else:
                     print("\033[92mNo mismatches found for", elf_name, "\033[0m")
 

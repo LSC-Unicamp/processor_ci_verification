@@ -41,7 +41,7 @@ async def memory_model(dut, memory, fetches, mem_access):
                 if dut.rst_n.value == 1 and raw_addr < 50:
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
-                # Write operation
+                # Write operation, depends on write strobe
                 if dut.core_wstrb.value == "1111":
                     write_value = dut.core_data_out.value.integer
                     memory[simulated_addr] = write_value
