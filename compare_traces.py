@@ -32,12 +32,16 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
     """
     Compare two execution traces, but the spike_trace is different than the dut trace.
     DUT trace is composed of trace fragments, and then a speculative trace is created.
+    Simulates the spike register file to detect repeated writes such as
+    regfile[1] <= 5
+    regfile[1] <= 5
     """
     # Generate processor/dut trace while comparing to the spike trace
     fetches_index = 0
     regfile_commits_index = 0
     memory_accesses_index = 0
     dut_trace_final = []
+    spike_regfile = [0] * 32
     for spike_entry in spike_trace:
         
         # dut_trace was shorter than spike_trace, probably a bug
@@ -48,6 +52,16 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
         # filter memory reads, dut cannot detect memory reads
         if spike_entry["mem_addr"] is not None and spike_entry["mem_val"] is None:
             spike_entry["mem_addr"] = None
+
+        # repeated writes cannot be detected. Mark them as speculative commits
+        if spike_entry["target_reg"] is not None:
+            repeated_write = spike_regfile[spike_entry["target_reg"]] == spike_entry["reg_val"]
+
+        speculative_commit = False
+        if repeated_write:
+            speculative_commit = True
+            dut_trace["regfile_commits"].insert(regfile_commits_index, (spike_entry["target_reg"], spike_entry["reg_val"]))
+            
 
         if (spike_entry["pc"] != dut_trace["fetches"][fetches_index][0]
             # or spike_entry["instr"] != dut_trace["fetches"][fetches_index][1]
@@ -60,7 +74,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                 "reg_val": None,
                 "mem_addr": None,
                 "mem_val": None,
-                "speculative": True
+                "speculative_fetch": True,
+                "speculative_commit": speculative_commit
             })
             fetches_index += 1
         else:
@@ -77,13 +92,15 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         "reg_val": None,
                         "mem_addr": None,
                         "mem_val": None,
-                        "speculative": False
+                        "speculative_fetch": False,
+                        "speculative_commit": speculative_commit
                     })
                     fetches_index += 1
                 else:
                     if regfile_commits_index >= len(dut_trace["regfile_commits"]):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
                         break
+                    
 
                     dut_trace_final.append({
                         "pc": dut_trace["fetches"][fetches_index][0],
@@ -92,10 +109,12 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         "reg_val": dut_trace["regfile_commits"][regfile_commits_index][1],
                         "mem_addr": None,
                         "mem_val": None,
-                        "speculative": False
+                        "speculative_fetch": False,
+                        "speculative_commit": speculative_commit
                     })
                     fetches_index += 1
                     regfile_commits_index += 1
+                    spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
 
             elif is_store_instruction(dut_trace["fetches"][fetches_index][1]):
                 if memory_accesses_index >= len(dut_trace["memory_accesses"]):
@@ -109,7 +128,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "reg_val": None,
                     "mem_addr": dut_trace["memory_accesses"][memory_accesses_index][0],
                     "mem_val": dut_trace["memory_accesses"][memory_accesses_index][1],
-                    "speculative": False
+                    "speculative_fetch": False,
+                    "speculative_commit": speculative_commit
                 })
                 fetches_index += 1
                 memory_accesses_index += 1
@@ -121,7 +141,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "reg_val": None,
                     "mem_addr": None,
                     "mem_val": None,
-                    "speculative": False
+                    "speculative_fetch": False,
+                    "speculative_commit": speculative_commit
                 })
                 fetches_index += 1
             elif is_reg_instruction(dut_trace["fetches"][fetches_index][1]):
@@ -133,7 +154,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         "reg_val": None,
                         "mem_addr": None,
                         "mem_val": None,
-                        "speculative": False
+                        "speculative_fetch": False,
+                        "speculative_commit": speculative_commit
                     })
                     fetches_index += 1
                 else:
@@ -148,12 +170,14 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         "reg_val": dut_trace["regfile_commits"][regfile_commits_index][1],
                         "mem_addr": None,
                         "mem_val": None,
-                        "speculative": False
+                        "speculative_fetch": False,
+                        "speculative_commit": speculative_commit
                     })
                     fetches_index += 1
                     regfile_commits_index += 1
+                    spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
             else:
-                print(f"Unknown instruction: {dut_trace['fetches'][fetches_index][1]}.")
+                print(f"Unknown instruction: {hex(dut_trace['fetches'][fetches_index][1])}.")
                 # ignore unknown instruction as a speculative fetch
                 dut_trace_final.append({
                     "pc": dut_trace["fetches"][fetches_index][0],
@@ -162,7 +186,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "reg_val": None,
                     "mem_addr": None,
                     "mem_val": None,
-                    "speculative": False
+                    "speculative_fetch": False,
+                    "speculative_commit": False
                 })
                 fetches_index += 1
     return dut_trace_final
@@ -170,9 +195,9 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
 def compare_traces(spike_trace, dut_final_trace, elf_name):
     """
     Compare spike trace with dut final trace.
-    Ignore speculative entries in the dut final trace.
+    Ignore speculative fetch entries in the dut final trace.
     """
-    non_speculative_entries = [entry for entry in dut_final_trace if not entry.get("speculative", False)]
+    non_speculative_entries = [entry for entry in dut_final_trace if not entry.get("speculative_fetch", False)]
     mismatches = []
     
     for i in range(len(spike_trace)):
@@ -197,7 +222,8 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
             dut_entry["mem_addr"] = None
 
         dut_entry = non_speculative_entries[i].copy()
-        dut_entry.pop("speculative", None)  # Remove speculative key if exists
+        dut_entry.pop("speculative_fetch", None)  # Remove speculative key if exists
+        dut_entry.pop("speculative_commit", None)
 
         # Compare the spike entry with the DUT entry
         if spike_entry != dut_entry:
