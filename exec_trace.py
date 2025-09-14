@@ -58,10 +58,10 @@ async def data_memory_model(dut, memory, mem_access):
             raw_addr = dut.data_mem_addr.value.integer
             simulated_addr = (raw_addr // 4) % 65536
 
-            if dut.data_mem_we == 0:
-                dut.data_mem_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
-                
-            else:
+            # always read data, even for write operations
+            dut.data_mem_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+            
+            if dut.data_mem_we == 1:
                 # Write operation, depends on write strobe
                 if dut.data_mem_wstrb.value == "1111":
                     write_value = dut.data_mem_data_out.value.integer
@@ -101,10 +101,11 @@ async def memory_model(dut, memory, fetches, mem_access):
             raw_addr = dut.core_addr.value.integer
             simulated_addr = (raw_addr // 4) % 65536
 
+            
+            # always read data, even for write operations
+            dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+            
             if dut.core_we == 0:
-                dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
-                
-                # instructions are only valid when reset is not active
                 # program is located at the beginning of memory, less than 50 words
                 if dut.rst_n.value == 1 and raw_addr < 50:
                     fetches.append((raw_addr, memory[simulated_addr]))
@@ -142,8 +143,8 @@ async def memory_model(dut, memory, fetches, mem_access):
 def show_signals_of_interest(dut, TWO_MEMORIES):
     if TWO_MEMORIES:
         dut._log.info("CORE_STB=%s", dut.core_stb.value)
-        dut._log.info("CORE_ADDR=%s", dut.core_addr.value)
-        dut._log.info("CORE_DATA_IN=%s", dut.core_data_in.value)
+        dut._log.info("CORE_ADDR=%x", dut.core_addr.value)
+        dut._log.info("CORE_DATA_IN=%x", dut.core_data_in.value)
         dut._log.info("CORE_WE=%s", dut.core_we.value)
         dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
         dut._log.info("DATA_MEM_CYC=%s", dut.data_mem_cyc.value)
@@ -343,16 +344,13 @@ if __name__ == "__main__":
     
     clean_command = ["make", "-f", makefile, "clean"]
 
-    make_command = ["make", "-f", makefile, "regression"]
+    make_command = ["make", "-f", makefile]
     try:
         if args.elf_folder:
             subprocess.run(clean_command, check=True, env=env)
             for test_file in os.listdir(elf_folder):
                 elf_file = os.path.join(elf_folder, test_file)
                 if os.path.isfile(elf_file) and elf_file.endswith(".elf"):  
-                    # Set ELF file in environment
-                    # gambiarra, força a data do arquivo para disparar o make
-                    os.utime(elf_file, (time.time(), time.time()))
                     env['ELF'] = elf_file
                     
                     # Run make commands
