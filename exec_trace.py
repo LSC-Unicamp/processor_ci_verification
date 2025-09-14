@@ -1,5 +1,5 @@
 import cocotb
-from cocotb.triggers import Timer, RisingEdge, ReadOnly, ReadWrite
+from cocotb.triggers import Timer, RisingEdge, ReadWrite, ReadOnly, NextTimeStep
 from cocotb.clock import Clock
 from cocotb.binary import BinaryValue
 
@@ -35,9 +35,11 @@ async def instruction_memory_model(dut, memory, fetches):
             if dut.core_we == 0:
                 dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
                 
-                # instructions are only valid when reset is not active
+                # wait for reset release
+                await NextTimeStep()
+                await ReadWrite()
                 # program is located at the beginning of memory, less than 50 words
-                if dut.rst_n.value == 1:
+                if dut.rst_n.value == 1 and raw_addr < 50:
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
                 write_value = dut.core_data_out.value.integer
@@ -54,13 +56,15 @@ async def data_memory_model(dut, memory, mem_access):
         await ReadWrite() # wait for signals to propagate after the clock edge
 
         if dut.data_mem_cyc.value == 1 and dut.data_mem_stb.value == 1: # active transaction
-            
+
             raw_addr = dut.data_mem_addr.value.integer
             simulated_addr = (raw_addr // 4) % 65536
 
             # always read data, even for write operations
             dut.data_mem_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
-            
+            await NextTimeStep()
+            await ReadWrite()
+
             if dut.data_mem_we == 1:
                 # Write operation, depends on write strobe
                 if dut.data_mem_wstrb.value == "1111":
@@ -104,6 +108,8 @@ async def memory_model(dut, memory, fetches, mem_access):
             
             # always read data, even for write operations
             dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+            await NextTimeStep()
+            await ReadWrite()
             
             if dut.core_we == 0:
                 # program is located at the beginning of memory, less than 50 words
@@ -185,6 +191,7 @@ def resolve_path(dut, path: str):
             handle = getattr(handle, part)
     return handle
 
+
 @cocotb.test()
 async def execution_trace(dut):
 
@@ -205,8 +212,8 @@ async def execution_trace(dut):
     dut.rst_n.value = 0
     await wait_cycles(dut.sys_clk, 5)
 
-    # start memory in the middle of reset to avoid xxxxx at data_out port
-    
+    # Start memory and reset register file ###########################################################
+
     if TWO_MEMORIES:
         # Initialize instruction memory from ELF
         filename = os.environ.get("ELF")
@@ -224,18 +231,17 @@ async def execution_trace(dut):
         # Initialize memory from ELF
         filename = os.environ.get("ELF")
         memory = elf_reader.load_memory(filename)
-        # Append end of simulation condition:
-        memory.append(19081998)    
+        
+        # Append end of simulation condition (after some nops because DUT may speculatively fetch it):
+        for _ in range(len(memory), len(memory)+3):
+            memory.append(0x13) # NOP
+        memory.append(19081998)
+
+        # fill rest of memory with NOPs
         for _ in range(len(memory), 65536):
-            memory.append(0x13) # NOP 
+            memory.append(0x13) # NOP
         cocotb.start_soon(memory_model(dut, memory, fetches, mem_access))
 
-    await wait_cycles(dut.sys_clk, 5)
-
-    dut.rst_n.value = 1
-    await ReadWrite()  # Wait for the signals to propagate after reset
-
-    # Check for register file changes
     # First, determine which registers exist by checking if they can be accessed
     # rvx, for example, does not have x0
     reg_file = resolve_path(dut, os.environ.get("REGFILE"))
@@ -248,24 +254,39 @@ async def execution_trace(dut):
         except (IndexError, AttributeError):
             # Register doesn't exist, skip it
             continue
+
+    for i in available_regs:
+        reg_file[i].value = 0
+
+    ##############################################################################################
+
+    await wait_cycles(dut.sys_clk, 5)
+    dut.rst_n.value = 1
+    await ReadWrite()  # Wait for the signals to propagate after reset
+
+    # This is used to check for register file changes
+    old_regfile = {}
+    for i in available_regs:
+        old_regfile[i] = reg_file[i].value
+
    # Main simulation loop
     for _ in range(100):
         show_signals_of_interest(dut, TWO_MEMORIES)
         
-        old_regfile = {}
-        for i in available_regs:
-            old_regfile[i] = reg_file[i].value
-            
-        await RisingEdge(dut.sys_clk)
-        await ReadOnly() # Wait for the memory to react
-
         for i in available_regs:
             if reg_file[i].value != old_regfile[i]:
                 regfile_commits.append((i, reg_file[i].value.integer))
         if fetches and fetches[-1][1] == 19081998:
-            dut._log.info("End of program detected via magic value in memory. Stopping simulation after 10 cycles.")
+            dut._log.info("Magic value detected. Wait for pipeline to finish and stop simulation.")
             await wait_cycles(dut.sys_clk, 10)
             break
+
+        for i in available_regs:
+            old_regfile[i] = reg_file[i].value
+
+        await RisingEdge(dut.sys_clk)
+        await ReadWrite() # Wait for the memory to react
+
 
 
     # finished simulation, write trace to file
@@ -293,7 +314,6 @@ async def execution_trace(dut):
         trace_file.write(json_str)
 
 
-
 # Since cocotb cannot receive arguments,
 # __main__ reads arguments and writes them to a fixed-location, temporary file
 if __name__ == "__main__":
@@ -317,6 +337,7 @@ if __name__ == "__main__":
     
     parser.add_argument("--reg_file","-r", required=True, type=str, help="Cocotb path to the register trace file.")
     parser.add_argument("--output_dir","-o", required=True, type=str, help="Directory to store the trace files.")
+    parser.add_argument("--verbose","-v", action="store_true", help="If set, the output of the make command will be shown in real-time.")
 
     args = parser.parse_args()
     makefile = args.makefile
@@ -325,6 +346,11 @@ if __name__ == "__main__":
     elf_folder = args.elf_folder
     reg_file = args.reg_file
     output_dir = args.output_dir
+
+    if args.verbose:
+        verbose = None  # inherit parent's stdout/stderr
+    else:
+        verbose = subprocess.DEVNULL  # suppress output
 
     # make sure make command will have access to the cocotb_verification files even if called from another directory
     exec_trace_path = os.path.abspath(os.path.join(os.path.dirname(__file__)))
@@ -354,17 +380,29 @@ if __name__ == "__main__":
                     env['ELF'] = elf_file
                     
                     # Run make commands
-                    result = subprocess.run(make_command, check=True, env=env)
-                    print(f"\033[96mProcessed {os.path.basename(elf_file)}\033[0m" + "\n")
+                    result = subprocess.run(make_command, check=True, env=env, 
+                       stdout=verbose, stderr=verbose)
+
+                    # careful, this is hardcoded
+                    with open("results.xml", "r") as f:
+                        content = f.read()
+                        successful_simulation = "failure" not in content and "error" not in content
+
+                    if successful_simulation:
+                        print(f"\033[96mSuccessfully processed {os.path.basename(elf_file)}\033[0m")
+                    else:
+                        print(f"\033[91mFailed to process {os.path.basename(elf_file)}\033[0m")
         else:
             # Set ELF file in environment
             env['ELF'] = elf_file
             
             # Run clean command first
-            subprocess.run(clean_command, check=True, env=env)
-            
+            subprocess.run(clean_command, check=True, env=env,
+                           stdout=verbose, stderr=verbose)
+
             # Run make command with real-time colored output
-            result = subprocess.run(make_command, check=True, env=env)
+            result = subprocess.run(make_command, check=True, env=env, 
+                       stdout=verbose, stderr=verbose)
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while running bash command: {e}")
         print("STDOUT:")

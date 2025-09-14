@@ -53,8 +53,11 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
     memory_accesses_index = 0
     dut_trace_final = []
     spike_regfile = [0] * 32
-    for spike_entry in spike_trace:
-        
+    spike_index = 0
+    while spike_index < len(spike_trace):
+
+        spike_entry = spike_trace[spike_index]
+
         # dut_trace was shorter than spike_trace, probably a bug
         if fetches_index >= len(dut_trace["fetches"]):
             print(f"{elf_name} trace ended before expected (out of fetches).")
@@ -107,6 +110,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         "speculative_commit": speculative_commit
                     })
                     fetches_index += 1
+                    spike_index += 1
                 else:
                     if regfile_commits_index >= len(dut_trace["regfile_commits"]):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
@@ -125,6 +129,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     })
                     fetches_index += 1
                     regfile_commits_index += 1
+                    spike_index += 1
                     spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
 
             elif (is_store_byte_instruction(dut_trace["fetches"][fetches_index][1]) or
@@ -158,6 +163,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                 })
                 fetches_index += 1
                 memory_accesses_index += 1
+                spike_index += 1
             elif is_branch_instruction(dut_trace["fetches"][fetches_index][1]):
                 dut_trace_final.append({
                     "pc": dut_trace["fetches"][fetches_index][0],
@@ -183,6 +189,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         "speculative_commit": speculative_commit
                     })
                     fetches_index += 1
+                    spike_index += 1
                 else:
                     if regfile_commits_index >= len(dut_trace["regfile_commits"]):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
@@ -200,6 +207,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     })
                     fetches_index += 1
                     regfile_commits_index += 1
+                    spike_index += 1
                     spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
                     
             elif is_jump_instruction(dut_trace["fetches"][fetches_index][1]):
@@ -215,6 +223,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         "speculative_commit": speculative_commit
                     })
                     fetches_index += 1
+                    spike_index += 1
                 else:
                     if regfile_commits_index >= len(dut_trace["regfile_commits"]):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
@@ -232,6 +241,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     })
                     fetches_index += 1
                     regfile_commits_index += 1
+                    spike_index += 1
+                    spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
 
             else:
                 print(f"Unknown instruction: {hex(dut_trace['fetches'][fetches_index][1])}.")
@@ -247,6 +258,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "speculative_commit": False
                 })
                 fetches_index += 1
+                spike_index += 1
     return dut_trace_final
 
 def compare_traces(spike_trace, dut_final_trace, elf_name):
@@ -368,11 +380,19 @@ if __name__ == "__main__":
             print("\033[92mNo mismatches found for", elf_name, "\033[0m")
             
     else:
-        for spike_file in sorted(os.listdir(args.spike_trace_dir)):
+        spike_files = sorted(os.listdir(args.spike_trace_dir))
+        if not spike_files:
+            print(f"No files found in spike trace directory: {args.spike_trace_dir}")
+            exit(1)
+        
+        for spike_file in spike_files:
             if spike_file.endswith(".spike.json"):
                 elf_name = spike_file.split(".")[0]
                 spike_path = os.path.join(args.spike_trace_dir, spike_file)
                 dut_path = os.path.join(args.dut_trace_dir, f"{elf_name}.fragmented.json")
+                if not os.path.exists(dut_path):
+                    print(f"DUT trace file not found: {dut_path}")
+                    continue
 
                 with open(spike_path, "r") as f:
                     spike_trace = json.load(f)
