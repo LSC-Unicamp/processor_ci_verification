@@ -218,8 +218,11 @@ async def execution_trace(dut):
         # Initialize instruction memory from ELF
         filename = os.environ.get("ELF")
         instruction_memory = elf_reader.load_memory(filename)
-        # Append end of simulation condition:
-        instruction_memory.append(19081998)    
+        # Append end of simulation condition (after some nops because DUT may speculatively fetch it):
+        for _ in range(len(instruction_memory), len(instruction_memory)+5):
+            instruction_memory.append(0x13) # NOP
+        instruction_memory.append(19081998)
+        # fill rest of memory with NOPs
         for _ in range(len(instruction_memory), 65536):
             instruction_memory.append(0x13) # NOP
 
@@ -233,10 +236,9 @@ async def execution_trace(dut):
         memory = elf_reader.load_memory(filename)
         
         # Append end of simulation condition (after some nops because DUT may speculatively fetch it):
-        for _ in range(len(memory), len(memory)+3):
+        for _ in range(len(memory), len(memory)+5):
             memory.append(0x13) # NOP
         memory.append(19081998)
-
         # fill rest of memory with NOPs
         for _ in range(len(memory), 65536):
             memory.append(0x13) # NOP

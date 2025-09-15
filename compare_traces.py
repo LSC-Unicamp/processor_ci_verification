@@ -176,6 +176,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "speculative_commit": speculative_commit
                 })
                 fetches_index += 1
+                spike_index += 1
             elif is_reg_instruction(dut_trace["fetches"][fetches_index][1]):
                 if write_to_zero: # just the fetch
                     dut_trace_final.append({
