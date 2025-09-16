@@ -14,6 +14,10 @@ import re
 # custom functions
 import elf_reader
 
+# Simulation parameters
+RIGHT_JUSTIFIED = True
+TWO_MEMORIES = True
+
 
 async def instruction_memory_model(dut, memory, fetches):
     ###############################################################################
@@ -63,7 +67,12 @@ async def data_memory_model(dut, memory, mem_access):
             simulated_addr = (raw_addr // 4) % 65536
 
             # always read data, even for write operations
-            dut.data_mem_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+            # each position in inst_memory has 4 bytes
+            if RIGHT_JUSTIFIED: # lb and lh instructions expect data at LSB
+                shift_amount = (raw_addr % 4) * 8
+                dut.data_mem_data_in.value = memory[simulated_addr] >> shift_amount
+            else:
+                dut.data_mem_data_in.value = memory[simulated_addr]
             await NextTimeStep()
             await ReadWrite()
 
@@ -212,9 +221,6 @@ async def debug_print(dut):
 async def execution_trace(dut):
 
     # cocotb.start_soon(debug_print(dut))
-    #####################################################################################
-    TWO_MEMORIES = True
-    #####################################################################################
     fetches = []
     regfile_commits = []
     mem_access = []
