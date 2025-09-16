@@ -2,6 +2,7 @@ import cocotb
 from cocotb.triggers import Timer, RisingEdge, ReadWrite, ReadOnly, NextTimeStep
 from cocotb.clock import Clock
 from cocotb.binary import BinaryValue
+from cocotb.utils import get_sim_time
 
 import os, time
 import json
@@ -9,22 +10,23 @@ import argparse
 import subprocess
 import re
 
+
 # custom functions
 import elf_reader
 
-###############################################################################
-# import debugpy
-# listen_host, listen_port = debugpy.listen(("localhost", 5678))
-# print("Waiting for Python debugger attach on {}:{}".format(listen_host, listen_port))
-# # Suspend execution until debugger attaches
-# debugpy.wait_for_client()
-# # Break into debugger for user control
-# breakpoint()  # or debugpy.breakpoint() on 3.6 and below
-###############################################################################
 
 async def instruction_memory_model(dut, memory, fetches):
+    ###############################################################################
+    # import debugpy
+    # listen_host, listen_port = debugpy.listen(("localhost", 5678))
+    # print("Waiting for Python debugger attach on {}:{}".format(listen_host, listen_port))
+    # # Suspend execution until debugger attaches
+    # debugpy.wait_for_client()
+    # # Break into debugger for user control
+    # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
+    ###############################################################################
     while True:
-        await RisingEdge(dut.sys_clk)  
+        await RisingEdge(dut.clk_core)  
         await ReadWrite() # wait for signals to propagate after the clock edge
 
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
@@ -52,7 +54,7 @@ async def instruction_memory_model(dut, memory, fetches):
 
 async def data_memory_model(dut, memory, mem_access):
     while True:
-        await RisingEdge(dut.sys_clk)  
+        await RisingEdge(dut.clk_core)  
         await ReadWrite() # wait for signals to propagate after the clock edge
 
         if dut.data_mem_cyc.value == 1 and dut.data_mem_stb.value == 1: # active transaction
@@ -91,13 +93,13 @@ async def data_memory_model(dut, memory, mem_access):
 
                 mem_access.append((raw_addr, write_value))
 
-            dut.core_ack.value = 1
+            dut.data_mem_ack.value = 1
         else:
-            dut.core_ack.value = 0
+            dut.data_mem_ack.value = 0
 
 async def memory_model(dut, memory, fetches, mem_access):
     while True:
-        await RisingEdge(dut.sys_clk)  
+        await RisingEdge(dut.clk_core)  
         await ReadWrite() # wait for signals to propagate after the clock edge
 
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
@@ -149,6 +151,7 @@ async def memory_model(dut, memory, fetches, mem_access):
 def show_signals_of_interest(dut, TWO_MEMORIES):
     if TWO_MEMORIES:
         dut._log.info("CORE_STB=%s", dut.core_stb.value)
+        dut._log.info("CORE_ACK=%s", dut.core_ack.value)
         dut._log.info("CORE_ADDR=%x", dut.core_addr.value)
         dut._log.info("CORE_DATA_IN=%x", dut.core_data_in.value)
         dut._log.info("CORE_WE=%s", dut.core_we.value)
@@ -191,13 +194,27 @@ def resolve_path(dut, path: str):
             handle = getattr(handle, part)
     return handle
 
+# Used only at debbugging
+async def debug_print(dut):
+    while True:
+        await NextTimeStep()
+        await ReadOnly()
+        dut._log.info("At time %.2f ns" % get_sim_time(units="ns"))
+        dut._log.info("core_stb=%s", dut.core_stb.value)
+        dut._log.info("core_ack=%s", dut.core_ack.value)
+        dut._log.info("instr_req=%s", dut.instr_req.value)
+        dut._log.info("instr_resp=%s", dut.instr_resp.value)
+        dut._log.info("")
+
+
 
 @cocotb.test()
 async def execution_trace(dut):
 
-    ################################
+    # cocotb.start_soon(debug_print(dut))
+    #####################################################################################
     TWO_MEMORIES = True
-    ################################
+    #####################################################################################
     fetches = []
     regfile_commits = []
     mem_access = []
@@ -286,7 +303,7 @@ async def execution_trace(dut):
         for i in available_regs:
             old_regfile[i] = reg_file[i].value
 
-        await RisingEdge(dut.sys_clk)
+        await RisingEdge(dut.clk_core)
         await ReadWrite() # Wait for the memory to react
 
 
@@ -319,15 +336,6 @@ async def execution_trace(dut):
 # Since cocotb cannot receive arguments,
 # __main__ reads arguments and writes them to a fixed-location, temporary file
 if __name__ == "__main__":
-    # ###############################################################################
-    # import debugpy
-    # listen_host, listen_port = debugpy.listen(("localhost", 5678))
-    # print("Waiting for Python debugger attach on {}:{}".format(listen_host, listen_port))
-    # # Suspend execution until debugger attaches
-    # debugpy.wait_for_client()
-    # # Break into debugger for user control
-    # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
-    # ###############################################################################
 
     parser = argparse.ArgumentParser(description="Run a ELF binaries and collect the fragmented execution trace.")
     parser.add_argument("--makefile","-m", required=True, type=str, help="Path to the makefile to use.")
@@ -385,7 +393,7 @@ if __name__ == "__main__":
                     result = subprocess.run(make_command, check=True, env=env, 
                        stdout=verbose, stderr=verbose)
 
-                    # careful, this is hardcoded
+                    # careful, this is hardcoded ############################################################
                     with open("results.xml", "r") as f:
                         content = f.read()
                         successful_simulation = "failure" not in content and "error" not in content
