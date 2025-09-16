@@ -15,7 +15,7 @@ import re
 import elf_reader
 
 # Simulation parameters
-RIGHT_JUSTIFIED = True
+RIGHT_JUSTIFIED = False
 TWO_MEMORIES = True
 
 
@@ -30,7 +30,7 @@ async def instruction_memory_model(dut, memory, fetches):
     # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
     ###############################################################################
     while True:
-        await RisingEdge(dut.clk_core)  
+        await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
 
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
@@ -58,7 +58,7 @@ async def instruction_memory_model(dut, memory, fetches):
 
 async def data_memory_model(dut, memory, mem_access):
     while True:
-        await RisingEdge(dut.clk_core)  
+        await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
 
         if dut.data_mem_cyc.value == 1 and dut.data_mem_stb.value == 1: # active transaction
@@ -108,7 +108,7 @@ async def data_memory_model(dut, memory, mem_access):
 
 async def memory_model(dut, memory, fetches, mem_access):
     while True:
-        await RisingEdge(dut.clk_core)  
+        await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
 
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
@@ -309,7 +309,7 @@ async def execution_trace(dut):
         for i in available_regs:
             old_regfile[i] = reg_file[i].value
 
-        await RisingEdge(dut.clk_core)
+        await RisingEdge(dut.sys_clk)
         await ReadWrite() # Wait for the memory to react
 
 
