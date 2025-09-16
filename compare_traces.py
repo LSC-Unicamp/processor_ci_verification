@@ -39,6 +39,20 @@ def is_reg_instruction(instruction):
                 )
     return reg_opcode
 
+def reorder_superscalar_commits(spike_entry, regfile_commits, regfile_commits_index):
+    """
+    Look for the next commits in case the superscalar processor committed out of order.
+    If it does not find a match within the next 4 commits, nothing is changed.
+    """
+    next_index = regfile_commits_index + 1
+    while next_index < regfile_commits_index + 4 and next_index < len(regfile_commits):
+        next_commit = regfile_commits[next_index]
+        if next_commit[0] == spike_entry["target_reg"] and next_commit[1] == spike_entry["reg_val"]:
+            # Swap the commits to bring the matching one to the current index
+            regfile_commits[regfile_commits_index], regfile_commits[next_index] = regfile_commits[next_index], regfile_commits[regfile_commits_index]
+            return
+        next_index += 1
+
 def generate_final_trace(spike_trace, dut_trace, elf_name):
     """
     Compare two execution traces, but the spike_trace is different than the dut trace.
@@ -116,6 +130,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
                         break
                     
+                    reorder_superscalar_commits(spike_entry, dut_trace["regfile_commits"], regfile_commits_index)
 
                     dut_trace_final.append({
                         "pc": dut_trace["fetches"][fetches_index][0],
@@ -195,6 +210,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     if regfile_commits_index >= len(dut_trace["regfile_commits"]):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
                         break
+
+                    reorder_superscalar_commits(spike_entry, dut_trace["regfile_commits"], regfile_commits_index)
 
                     dut_trace_final.append({
                         "pc": dut_trace["fetches"][fetches_index][0],
