@@ -55,11 +55,12 @@ def reorder_superscalar_commits(spike_entry, regfile_commits, regfile_commits_in
 
 def generate_final_trace(spike_trace, dut_trace, elf_name):
     """
-    Compare two execution traces, but the spike_trace is different than the dut trace.
-    DUT trace is composed of trace fragments, and then a speculative trace is created.
-    Simulates the spike register file to detect repeated writes such as
+    Compares the spike trace with the dut fragmented trace to generate a final dut trace.
+    If the dut trace has more fetches than needed, these are marked as speculative fetches.
+    Since the simulation only detects changes to the register file, repeated writes such as
     regfile[1] <= 5
     regfile[1] <= 5
+    are not detected. In this case, a correct commit is added and marked as speculative commit. 
     """
     # Generate processor/dut trace while comparing to the spike trace
     fetches_index = 0
