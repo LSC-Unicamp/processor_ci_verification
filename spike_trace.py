@@ -19,7 +19,8 @@ def generate_spike_trace(elf_file, output_dir):
     trace_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(elf_file))[0]}.trace")
     # For some reason, --instructions=<n> makes spike stop after the last instruction in the elf, even if less than <n>.
     # Do not use the -l option
-    command = f"spike --isa=rv32i --log-commits -m0x7ffff000:0x10000 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
+    print(f"Generating Spike trace for {elf_file} at {trace_file}...")
+    command = f"spike --isa=rv32i --log-commits -m0x7ffff000:0x1000000 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
     subprocess.run(command, shell=True, check=True)
 
     return trace_file
@@ -89,7 +90,8 @@ def parse_spike_trace(trace_file):
     index = 0
     while index < len(filtered_results):
         if (filtered_results[index]["instr"] == 1048723 and # li ra, 1
-        filtered_results[index+1]["instr"] == 5015          # auipc	t2,0x1
+        (filtered_results[index+1]["instr"] == 5015 or      # auipc	t2,0x1
+         filtered_results[index+1]["instr"] == 919)         # auipc	t2,0x0
         ):
             break
         index += 1

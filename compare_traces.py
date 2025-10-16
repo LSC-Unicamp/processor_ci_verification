@@ -39,6 +39,10 @@ def is_reg_instruction(instruction):
                 )
     return reg_opcode
 
+def is_fence_instruction(instruction):
+    fence_op_code = instruction & 0b1111111 == 0b0001111 # fence
+    return fence_op_code
+
 def reorder_superscalar_commits(spike_entry, regfile_commits, regfile_commits_index):
     """
     Look for the next commits in case the superscalar processor committed out of order.
@@ -264,6 +268,19 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     spike_index += 1
                     spike_regfile[spike_entry["target_reg"]] = spike_entry["reg_val"]
 
+            elif is_fence_instruction(dut_trace["fetches"][fetches_index][1]):
+                dut_trace_final.append({
+                    "pc": dut_trace["fetches"][fetches_index][0],
+                    "instr": dut_trace["fetches"][fetches_index][1],
+                    "target_reg": None,
+                    "reg_val": None,
+                    "mem_addr": None,
+                    "mem_val": None,
+                    "speculative_fetch": False,
+                    "speculative_commit": speculative_commit
+                })
+                fetches_index += 1
+                spike_index += 1
             else:
                 print(f"Unknown instruction: {hex(dut_trace['fetches'][fetches_index][1])}.")
                 # ignore unknown instruction as a speculative fetch
@@ -274,7 +291,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "reg_val": None,
                     "mem_addr": None,
                     "mem_val": None,
-                    "speculative_fetch": False,
+                    "speculative_fetch": True,
                     "speculative_commit": False
                 })
                 fetches_index += 1
@@ -309,6 +326,10 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
         # DUT final trace does not show memory address for load instructions
         if spike_entry["instr"] & 0b1111111 == 0b0000011:
             dut_entry["mem_addr"] = None
+
+        # align memory addresses to word boundaries for stores
+        if spike_entry["instr"] & 0b1111111 == 0b0100011:
+            spike_entry["mem_addr"] = spike_entry["mem_addr"] & ~0b11
 
         dut_entry = non_speculative_entries[i].copy()
         dut_entry.pop("speculative_fetch", None)  # Remove speculative key if exists

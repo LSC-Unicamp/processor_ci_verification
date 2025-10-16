@@ -1,13 +1,15 @@
 from elftools.elf.elffile import ELFFile
 
-def load_memory(filename="program.elf"):
+def load_memory(memory_size, filename="program.elf"):
     """
-    Load the memory contents from the .text section of an ELF file.
+    Load the memory contents from the .text and .data sections of an ELF file.
     Args:
         filename (str): Path to the ELF file.
     Returns:
         list: A list of integers representing the memory contents. Each word is 4 bytes.
     """
+    memory = [0x13] * memory_size # nop
+
     with open(filename, 'rb') as file:
         elffile = ELFFile(file)
 
@@ -16,17 +18,50 @@ def load_memory(filename="program.elf"):
 
         if not text_section and not textinit_section:
             raise ValueError("No .text nor .text.init section found in the ELF file.")
-        
-        data = text_section.data() if text_section else textinit_section.data()
 
-        memory = []
-        for i in range(0, len(data), 4):
-            word = data[i:i+4]
+        text_data = text_section.data() if text_section else textinit_section.data()
+        text_start_address = text_section['sh_addr'] if text_section else textinit_section['sh_addr']
+
+        pointer = (text_start_address % memory_size) // 4
+        for i in range(0, len(text_data), 4):
+            word = text_data[i:i+4]
             if len(word) < 4:
-                break
-            memory.append(int.from_bytes(word, byteorder='little'))
+                word = word.ljust(4, b'\x00')
+            memory[pointer] = int.from_bytes(word, byteorder='little')
+            pointer += 1
+
+        data_section = elffile.get_section_by_name('.data')
+        if data_section:
+            data_data = data_section.data()
+            data_start_address = data_section['sh_addr']
+            pointer = (data_start_address % memory_size) // 4
+            for i in range(0, len(data_data), 4):
+                word = data_data[i:i+4]
+                if len(word) < 4:
+                    word = word.ljust(4, b'\x00')
+                memory[pointer] = int.from_bytes(word, byteorder='little')
+                pointer += 1
 
     return memory
+
+def load_data_memory(memory_size, filename="program.elf"):
+    data_memory = [0x13] * memory_size # nop
+    with open(filename, 'rb') as file:
+        elffile = ELFFile(file)
+
+        data_section = elffile.get_section_by_name('.data')
+        if data_section:
+            data_data = data_section.data()
+            data_start_address = data_section['sh_addr']
+            pointer = (data_start_address % memory_size) // 4
+            for i in range(0, len(data_data), 4):
+                word = data_data[i:i+4]
+                if len(word) < 4:
+                    word = word.ljust(4, b'\x00')
+                data_memory[pointer] = int.from_bytes(word, byteorder='little')
+                pointer += 1
+
+    return data_memory
 
 def get_tohost_address(filename="program.elf"):
     """

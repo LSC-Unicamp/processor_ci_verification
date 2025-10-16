@@ -17,7 +17,7 @@ import elf_reader
 # Simulation parameters
 RIGHT_JUSTIFIED = False
 TWO_MEMORIES = False
-MEM_SIZE = 65536
+MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
 SIMULATION_TIMEOUT_CYCLES = 100000
 
 
@@ -255,24 +255,18 @@ async def execution_trace(dut):
     if TWO_MEMORIES:
         # Initialize instruction memory from ELF
         filename = os.environ.get("ELF")
-        instruction_memory = elf_reader.load_memory(filename)
-        # Fill rest of memory with NOPs
-        for _ in range(len(instruction_memory), MEM_SIZE):
-            instruction_memory.append(0x13) # NOP
+        instruction_memory = elf_reader.load_memory(MEM_SIZE, filename)
+        data_memory = elf_reader.load_data_memory(MEM_SIZE, filename)
 
         start_of_text_section, end_of_text_section = elf_reader.get_text_section_addr(filename)
 
-        data_memory = [0] * MEM_SIZE  # Simple data memory initialized to zero
 
         cocotb.start_soon(instruction_memory_model(dut, instruction_memory, fetches, start_of_text_section, end_of_text_section))
         cocotb.start_soon(data_memory_model(dut, data_memory, mem_access))
     else:
         # Initialize memory from ELF
         filename = os.environ.get("ELF")
-        memory = elf_reader.load_memory(filename)
-        # fill rest of memory with NOPs
-        for _ in range(len(memory), MEM_SIZE):
-            memory.append(0x13) # NOP
+        memory = elf_reader.load_memory(MEM_SIZE,filename)
 
         start_of_text_section, end_of_text_section = elf_reader.get_text_section_addr(filename)
 
