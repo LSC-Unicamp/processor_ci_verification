@@ -16,10 +16,12 @@ import elf_reader
 
 # Simulation parameters
 RIGHT_JUSTIFIED = False
-TWO_MEMORIES = True
+TWO_MEMORIES = False
+MEM_SIZE = 65536
+SIMULATION_TIMEOUT_CYCLES = 100000
 
 
-async def instruction_memory_model(dut, memory, fetches):
+async def instruction_memory_model(dut, memory, fetches, start_of_text_section, end_of_text_section):
     ###############################################################################
     # import debugpy
     # listen_host, listen_port = debugpy.listen(("localhost", 5678))
@@ -29,6 +31,9 @@ async def instruction_memory_model(dut, memory, fetches):
     # # Break into debugger for user control
     # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
     ###############################################################################
+    # startup code for riscv-arch-test
+    rom = [0x800000b7, # lui x1,0x80000
+           0x00008067] # jalr x0, 0(x1)
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -36,16 +41,20 @@ async def instruction_memory_model(dut, memory, fetches):
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
             
             raw_addr = dut.core_addr.value.integer
-            simulated_addr = (raw_addr // 4) % 65536
+            simulated_addr = (raw_addr // 4) % MEM_SIZE
 
             if dut.core_we == 0:
-                dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+                # always read data, even for write operations
+                if raw_addr < 0x10:
+                    dut.core_data_in.value = rom[simulated_addr]
+                else:
+                    dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
                 
                 # wait for reset release
                 await NextTimeStep()
                 await ReadWrite()
-                # program is located at the beginning of memory, less than 50 words
-                if dut.rst_n.value == 1 and raw_addr < 50:
+                # it is only a fetch if it is reading the .text section
+                if dut.rst_n.value == 1 and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
                 write_value = dut.core_data_out.value.integer
@@ -64,7 +73,7 @@ async def data_memory_model(dut, memory, mem_access):
         if dut.data_mem_cyc.value == 1 and dut.data_mem_stb.value == 1: # active transaction
 
             raw_addr = dut.data_mem_addr.value.integer
-            simulated_addr = (raw_addr // 4) % 65536
+            simulated_addr = (raw_addr // 4) % MEM_SIZE
 
             # always read data, even for write operations
             # each position in inst_memory has 4 bytes
@@ -106,7 +115,10 @@ async def data_memory_model(dut, memory, mem_access):
         else:
             dut.data_mem_ack.value = 0
 
-async def memory_model(dut, memory, fetches, mem_access):
+async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, end_of_text_section):
+    # startup code for riscv-arch-test
+    rom = [0x800000b7, # lui x1,0x80000
+           0x00008067] # jalr x0, 0(x1)
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -114,17 +126,20 @@ async def memory_model(dut, memory, fetches, mem_access):
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
             
             raw_addr = dut.core_addr.value.integer
-            simulated_addr = (raw_addr // 4) % 65536
+            simulated_addr = (raw_addr // 4) % MEM_SIZE
 
-            
             # always read data, even for write operations
-            dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+            if raw_addr < 0x10:
+                dut.core_data_in.value = rom[simulated_addr] 
+            else:
+                dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+
             await NextTimeStep()
             await ReadWrite()
             
             if dut.core_we == 0:
-                # program is located at the beginning of memory, less than 50 words
-                if dut.rst_n.value == 1 and raw_addr < 50:
+                # it is only a fetch if it is reading the .text section
+                if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
                 # Write operation, depends on write strobe
@@ -235,43 +250,44 @@ async def execution_trace(dut):
     dut.rst_n.value = 0
     await wait_cycles(dut.sys_clk, 5)
 
-    # Start memory and reset register file ###########################################################
+    # Start memory, reset register file, get tohost symbol ###########################################################
 
     if TWO_MEMORIES:
         # Initialize instruction memory from ELF
         filename = os.environ.get("ELF")
         instruction_memory = elf_reader.load_memory(filename)
-        # Append end of simulation condition (after some nops because DUT may speculatively fetch it):
-        for _ in range(len(instruction_memory), len(instruction_memory)+5):
-            instruction_memory.append(0x13) # NOP
-        instruction_memory.append(19081998)
-        # fill rest of memory with NOPs
-        for _ in range(len(instruction_memory), 65536):
+        # Fill rest of memory with NOPs
+        for _ in range(len(instruction_memory), MEM_SIZE):
             instruction_memory.append(0x13) # NOP
 
-        data_memory = [0] * 65536  # Simple data memory initialized to zero
+        start_of_text_section, end_of_text_section = elf_reader.get_text_section_addr(filename)
 
-        cocotb.start_soon(instruction_memory_model(dut, instruction_memory, fetches))
+        data_memory = [0] * MEM_SIZE  # Simple data memory initialized to zero
+
+        cocotb.start_soon(instruction_memory_model(dut, instruction_memory, fetches, start_of_text_section, end_of_text_section))
         cocotb.start_soon(data_memory_model(dut, data_memory, mem_access))
     else:
         # Initialize memory from ELF
         filename = os.environ.get("ELF")
         memory = elf_reader.load_memory(filename)
-        
-        # Append end of simulation condition (after some nops because DUT may speculatively fetch it):
-        for _ in range(len(memory), len(memory)+5):
-            memory.append(0x13) # NOP
-        memory.append(19081998)
         # fill rest of memory with NOPs
-        for _ in range(len(memory), 65536):
+        for _ in range(len(memory), MEM_SIZE):
             memory.append(0x13) # NOP
-        cocotb.start_soon(memory_model(dut, memory, fetches, mem_access))
+
+        start_of_text_section, end_of_text_section = elf_reader.get_text_section_addr(filename)
+
+        cocotb.start_soon(memory_model(dut, memory, fetches, mem_access, start_of_text_section, end_of_text_section))
+
+    # get tohost symbol to detect end of program
+    filename = os.environ.get("ELF")
+    tohost_addr_raw = elf_reader.get_tohost_address(filename)
+    tohost_addr = (tohost_addr_raw // 4) % MEM_SIZE
 
     # First, determine which registers exist by checking if they can be accessed
     # rvx, for example, does not have x0
     reg_file = resolve_path(dut, os.environ.get("REGFILE"))
     available_regs = []
-    for i in range(len(reg_file)):
+    for i in range(32):
         try:
             # Test if register exists by trying to access it
             _ = reg_file[i].value
@@ -295,15 +311,20 @@ async def execution_trace(dut):
         old_regfile[i] = reg_file[i].value
 
    # Main simulation loop
-    for _ in range(100):
+    for _ in range(SIMULATION_TIMEOUT_CYCLES):
         show_signals_of_interest(dut, TWO_MEMORIES)
         
         for i in available_regs:
             if reg_file[i].value != old_regfile[i]:
                 regfile_commits.append((i, reg_file[i].value.integer))
-        if fetches and fetches[-1][1] == 19081998:
-            dut._log.info("Magic value detected. Wait for pipeline to finish and stop simulation.")
-            await wait_cycles(dut.sys_clk, 10)
+
+        stop_condition = False
+        if TWO_MEMORIES:
+            stop_condition = data_memory[tohost_addr] == 1
+        else:
+            stop_condition = memory[tohost_addr] == 1
+        if stop_condition:
+            dut._log.info("ToHost write detected. Stop simulation.")
             break
 
         for i in available_regs:
@@ -312,7 +333,8 @@ async def execution_trace(dut):
         await RisingEdge(dut.sys_clk)
         await ReadWrite() # Wait for the memory to react
 
-
+    # riscv arch test needed a jump to 0x80000000. Remove the commit of the startup code
+    regfile_commits.pop(0)
 
     # finished simulation, write trace to file
     src_path = os.getenv("SRCPATH")
@@ -386,7 +408,7 @@ if __name__ == "__main__":
     
     clean_command = ["make", "-f", makefile, "clean"]
 
-    make_command = ["make", "-f", makefile]
+    make_command = ["make", "-f", makefile, "WAVES=1"]
     try:
         if args.elf_folder:
             subprocess.run(clean_command, check=True, env=env)

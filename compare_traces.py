@@ -83,13 +83,14 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
             spike_entry["mem_addr"] = None
 
         # repeated writes cannot be detected. Mark them as speculative commits
+        repeated_write = False
         if spike_entry["target_reg"] is not None:
             repeated_write = spike_regfile[spike_entry["target_reg"]] == spike_entry["reg_val"]
 
         speculative_commit = False
         if repeated_write:
             speculative_commit = True
-            dut_trace["regfile_commits"].insert(regfile_commits_index, (spike_entry["target_reg"], spike_entry["reg_val"]))
+            dut_trace["regfile_commits"].insert(regfile_commits_index, [spike_entry["target_reg"], spike_entry["reg_val"]])
             
 
         if (spike_entry["pc"] != dut_trace["fetches"][fetches_index][0]
@@ -323,6 +324,7 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
     return mismatches
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(description="Generate a final DUT trace and then compare it to spike's trace")
     
     # Create mutually exclusive groups

@@ -19,7 +19,7 @@ def generate_spike_trace(elf_file, output_dir):
     trace_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(elf_file))[0]}.trace")
     # For some reason, --instructions=<n> makes spike stop after the last instruction in the elf, even if less than <n>.
     # Do not use the -l option
-    command = f"spike --isa=rv32i --log-commits -m0x0:0x1000 --instructions=20 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
+    command = f"spike --isa=rv32i --log-commits -m0x7ffff000:0x10000 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
     subprocess.run(command, shell=True, check=True)
 
     return trace_file
@@ -80,10 +80,21 @@ def parse_spike_trace(trace_file):
     # Remove the debug_rom part where spike starts execution 
     filtered_results = []
     for entry in results:
-        if entry["pc"] >= 0x1000:
+        if entry["pc"] >= 0x1000 and entry["pc"] <= 0x2000:
             continue
         else:
             filtered_results.append(entry)
+
+    # detect cleanup section of riscv-arch-test
+    index = 0
+    while index < len(filtered_results):
+        if (filtered_results[index]["instr"] == 1048723 and # li ra, 1
+        filtered_results[index+1]["instr"] == 5015          # auipc	t2,0x1
+        ):
+            break
+        index += 1
+    index += 2 # mark the sw instruction
+    filtered_results = filtered_results[:index+1]
 
     return filtered_results
 

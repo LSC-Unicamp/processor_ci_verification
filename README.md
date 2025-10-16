@@ -37,9 +37,9 @@ Compile the assembly program with the following flags:
 riscv32-unknown-elf-gcc -march=rv32i -mabi=ilp32 -nostdlib -Ttext=0x0 -o program.elf program.s`
 ```
 
-Run this command for spike:
+Run this command for spike when there is a `tohost` symbol to end the simulation:
 ```
-spike --isa=rv32i -m0x0:0x2000 --log-commits --instrcutions=100 program.elf
+spike --isa=rv32i -m0x7ffff000:0x10000 --log-commits program.elf
 ```
 
 `spike_trace.py` does all the steps mentioned here.

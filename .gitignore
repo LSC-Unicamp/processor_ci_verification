@@ -180,3 +180,4 @@ sim_build/
 output/
 tmp/
 results.xml
+.vscode/
