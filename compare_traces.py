@@ -2,6 +2,11 @@ import argparse
 import json
 import os
 
+# Some processor access only word-aligned addresses, while Spike provides the exact address
+# This flag makes the comparison ignore the two least significant bits of store addresses and align them to word boundaries
+# Needed this for tinyriscv
+WORD_BOUNDARY_STORES = False
+
 def is_load_instruction(instruction):
     load_op_code = instruction & 0b1111111 == 0b0000011 # lb, lh, lw, lbu, lhu
     return load_op_code
@@ -328,8 +333,9 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
             dut_entry["mem_addr"] = None
 
         # align memory addresses to word boundaries for stores
-        if spike_entry["instr"] & 0b1111111 == 0b0100011:
-            spike_entry["mem_addr"] = spike_entry["mem_addr"] & ~0b11
+        if WORD_BOUNDARY_STORES:
+            if spike_entry["instr"] & 0b1111111 == 0b0100011:
+                spike_entry["mem_addr"] = spike_entry["mem_addr"] & ~0b11
 
         dut_entry = non_speculative_entries[i].copy()
         dut_entry.pop("speculative_fetch", None)  # Remove speculative key if exists

@@ -16,7 +16,7 @@ import elf_reader
 
 # Simulation parameters
 RIGHT_JUSTIFIED = False
-TWO_MEMORIES = False
+TWO_MEMORIES = True
 MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
 SIMULATION_TIMEOUT_CYCLES = 100000
 
@@ -33,7 +33,10 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
     ###############################################################################
     # startup code for riscv-arch-test
     rom = [0x800000b7, # lui x1,0x80000
-           0x00008067] # jalr x0, 0(x1)
+           0x00008067, # jalr x0, 0(x1)
+           0x00000013, # nop
+           0x00000013, # nop
+           0x00000013] # nop in case of speculative fetches
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -118,7 +121,10 @@ async def data_memory_model(dut, memory, mem_access):
 async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, end_of_text_section):
     # startup code for riscv-arch-test
     rom = [0x800000b7, # lui x1,0x80000
-           0x00008067] # jalr x0, 0(x1)
+           0x00008067, # jalr x0, 0(x1)
+           0x00000013, # nop
+           0x00000013, # nop
+           0x00000013] # nop in case of speculative fetches
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -132,7 +138,11 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
             if raw_addr < 0x10:
                 dut.core_data_in.value = rom[simulated_addr] 
             else:
-                dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+                if RIGHT_JUSTIFIED: # lb and lh instructions expect data at LSB
+                    shift_amount = (raw_addr % 4) * 8
+                    dut.data_mem_data_in.value = memory[simulated_addr] >> shift_amount
+                else:
+                    dut.data_mem_data_in.value = memory[simulated_addr]
 
             await NextTimeStep()
             await ReadWrite()
