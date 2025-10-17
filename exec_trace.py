@@ -31,12 +31,6 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
     # # Break into debugger for user control
     # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
     ###############################################################################
-    # startup code for riscv-arch-test
-    rom = [0x800000b7, # lui x1,0x80000
-           0x00008067, # jalr x0, 0(x1)
-           0x00000013, # nop
-           0x00000013, # nop
-           0x00000013] # nop in case of speculative fetches
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -48,10 +42,7 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
 
             if dut.core_we == 0:
                 # always read data, even for write operations
-                if raw_addr < 0x10:
-                    dut.core_data_in.value = rom[simulated_addr]
-                else:
-                    dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+                dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
                 
                 # wait for reset release
                 await NextTimeStep()
@@ -119,12 +110,6 @@ async def data_memory_model(dut, memory, mem_access):
             dut.data_mem_ack.value = 0
 
 async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, end_of_text_section):
-    # startup code for riscv-arch-test
-    rom = [0x800000b7, # lui x1,0x80000
-           0x00008067, # jalr x0, 0(x1)
-           0x00000013, # nop
-           0x00000013, # nop
-           0x00000013] # nop in case of speculative fetches
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -134,15 +119,11 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
             raw_addr = dut.core_addr.value.integer
             simulated_addr = (raw_addr // 4) % MEM_SIZE
 
-            # always read data, even for write operations
-            if raw_addr < 0x10:
-                dut.core_data_in.value = rom[simulated_addr] 
+            if RIGHT_JUSTIFIED: # lb and lh instructions expect data at LSB
+                shift_amount = (raw_addr % 4) * 8
+                dut.data_mem_data_in.value = memory[simulated_addr] >> shift_amount
             else:
-                if RIGHT_JUSTIFIED: # lb and lh instructions expect data at LSB
-                    shift_amount = (raw_addr % 4) * 8
-                    dut.data_mem_data_in.value = memory[simulated_addr] >> shift_amount
-                else:
-                    dut.data_mem_data_in.value = memory[simulated_addr]
+                dut.data_mem_data_in.value = memory[simulated_addr]
 
             await NextTimeStep()
             await ReadWrite()
@@ -336,9 +317,6 @@ async def execution_trace(dut):
 
         await RisingEdge(dut.sys_clk)
         await ReadWrite() # Wait for the memory to react
-
-    # riscv arch test needed a jump to 0x80000000. Remove the commit of the startup code
-    regfile_commits.pop(0)
 
     # finished simulation, write trace to file
     src_path = os.getenv("SRCPATH")

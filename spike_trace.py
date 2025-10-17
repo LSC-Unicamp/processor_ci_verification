@@ -20,7 +20,7 @@ def generate_spike_trace(elf_file, output_dir):
     # For some reason, --instructions=<n> makes spike stop after the last instruction in the elf, even if less than <n>.
     # Do not use the -l option
     print(f"Generating Spike trace for {elf_file} at {trace_file}...")
-    command = f"spike --isa=rv32i --log-commits -m0x7ffff000:0x1000000 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
+    command = f"spike --isa=rv32i --log-commits -m0x0:0x01FFF000 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
     subprocess.run(command, shell=True, check=True)
 
     return trace_file
@@ -78,10 +78,12 @@ def parse_spike_trace(trace_file):
                 }
                 results.append(entry)
 
-    # Remove the debug_rom part where spike starts execution 
+    # Remove the debug_rom part where spike starts execution
+    DEBUG_START = 0x08000000
+    DEBUG_SIZE = 0x2000
     filtered_results = []
     for entry in results:
-        if entry["pc"] >= 0x1000 and entry["pc"] <= 0x2000:
+        if entry["pc"] >= DEBUG_START and entry["pc"] < DEBUG_START + DEBUG_SIZE:
             continue
         else:
             filtered_results.append(entry)

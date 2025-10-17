@@ -24,13 +24,13 @@ python3 compare_traces.py -s output/000_addi.spike.json -d output/000_addi.fragm
 
 It was necessary to change the spike memory map in order to execute programs starting at address 0x0. Most processors in Processor-CI have their starting address at this position. To change the map it was required to:
 
-Change bootrom from 0x0:0xFFF to 0x1000:0x1FFF at `riscv/platform.h`
+Change bootrom from at `riscv/platform.h`
 ```C
-#define DEBUG_START 0x1000; #define DEBUG_SIZE 0x1000
+#define DEBUG_START 0x08001000; #define DEBUG_SIZE 0x1000
 ```
-Change reset vector to 0x0 at `riscv/platform.h`
+Change reset vector at `riscv/platform.h`. A rom device is created here.
 ```C
-#define DEFAULT_RSTVEC 0x00000000
+#define DEFAULT_RSTVEC 0x08000000
 ```
 Compile the assembly program with the following flags:
 ```bash
