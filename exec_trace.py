@@ -18,7 +18,7 @@ import elf_reader
 RIGHT_JUSTIFIED = False
 TWO_MEMORIES = True
 MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
-SIMULATION_TIMEOUT_CYCLES = 100000
+SIMULATION_TIMEOUT_CYCLES = 50
 
 
 async def instruction_memory_model(dut, memory, fetches, start_of_text_section, end_of_text_section):
@@ -81,25 +81,25 @@ async def data_memory_model(dut, memory, mem_access):
 
             if dut.data_mem_we == 1:
                 # Write operation, depends on write strobe
-                if dut.data_mem_wstrb.value == "1111":
+                if dut.data_mem_sel.value == "1111":
                     write_value = dut.data_mem_data_out.value.integer
                     memory[simulated_addr] = write_value
-                elif dut.data_mem_wstrb.value == "0011":
+                elif dut.data_mem_sel.value == "0011":
                     write_value = (memory[simulated_addr] & 0xFFFF0000) | (dut.data_mem_data_out.value.integer & 0x0000FFFF)
                     memory[simulated_addr] = write_value
-                elif dut.data_mem_wstrb.value == "1100":
+                elif dut.data_mem_sel.value == "1100":
                     write_value = (memory[simulated_addr] & 0x0000FFFF) | (dut.data_mem_data_out.value.integer & 0xFFFF0000)
                     memory[simulated_addr] = write_value
-                elif dut.data_mem_wstrb.value == "0001":
+                elif dut.data_mem_sel.value == "0001":
                     write_value = (memory[simulated_addr] & 0xFFFFFF00) | (dut.data_mem_data_out.value.integer & 0x000000FF)
                     memory[simulated_addr] = write_value
-                elif dut.data_mem_wstrb.value == "0010":
+                elif dut.data_mem_sel.value == "0010":
                     write_value = (memory[simulated_addr] & 0xFFFF00FF) | (dut.data_mem_data_out.value.integer & 0x0000FF00)
                     memory[simulated_addr] = write_value
-                elif dut.data_mem_wstrb.value == "0100":
+                elif dut.data_mem_sel.value == "0100":
                     write_value = (memory[simulated_addr] & 0xFF00FFFF) | (dut.data_mem_data_out.value.integer & 0x00FF0000)
                     memory[simulated_addr] = write_value
-                elif dut.data_mem_wstrb.value == "1000":
+                elif dut.data_mem_sel.value == "1000":
                     write_value = (memory[simulated_addr] & 0x00FFFFFF) | (dut.data_mem_data_out.value.integer & 0xFF000000)
                     memory[simulated_addr] = write_value
 
@@ -134,25 +134,25 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
                 # Write operation, depends on write strobe
-                if dut.core_wstrb.value == "1111":
+                if dut.core_sel.value == "1111":
                     write_value = dut.core_data_out.value.integer
                     memory[simulated_addr] = write_value
-                elif dut.core_wstrb.value == "0011":
+                elif dut.core_sel.value == "0011":
                     write_value = (memory[simulated_addr] & 0xFFFF0000) | (dut.core_data_out.value.integer & 0x0000FFFF)
                     memory[simulated_addr] = write_value
-                elif dut.core_wstrb.value == "1100":
+                elif dut.core_sel.value == "1100":
                     write_value = (memory[simulated_addr] & 0x0000FFFF) | (dut.core_data_out.value.integer & 0xFFFF0000)
                     memory[simulated_addr] = write_value
-                elif dut.core_wstrb.value == "0001":
+                elif dut.core_sel.value == "0001":
                     write_value = (memory[simulated_addr] & 0xFFFFFF00) | (dut.core_data_out.value.integer & 0x000000FF)
                     memory[simulated_addr] = write_value
-                elif dut.core_wstrb.value == "0010":
+                elif dut.core_sel.value == "0010":
                     write_value = (memory[simulated_addr] & 0xFFFF00FF) | (dut.core_data_out.value.integer & 0x0000FF00)
                     memory[simulated_addr] = write_value
-                elif dut.core_wstrb.value == "0100":
+                elif dut.core_sel.value == "0100":
                     write_value = (memory[simulated_addr] & 0xFF00FFFF) | (dut.core_data_out.value.integer & 0x00FF0000)
                     memory[simulated_addr] = write_value
-                elif dut.core_wstrb.value == "1000":
+                elif dut.core_sel.value == "1000":
                     write_value = (memory[simulated_addr] & 0x00FFFFFF) | (dut.core_data_out.value.integer & 0xFF000000)
                     memory[simulated_addr] = write_value
 
@@ -177,7 +177,7 @@ def show_signals_of_interest(dut, TWO_MEMORIES):
         dut._log.info("DATA_MEM_DATA_IN=%s", dut.data_mem_data_in.value)
         dut._log.info("DATA_MEM_WE=%s", dut.data_mem_we.value)
         dut._log.info("DATA_MEM_DATA_OUT=%s", dut.data_mem_data_out.value)
-        dut._log.info("DATA_MEM_WSTRB=%s", dut.data_mem_wstrb.value)
+        dut._log.info("DATA_MEM_SEL=%s", dut.data_mem_sel.value)
         dut._log.info("")
     else:
         dut._log.info("CORE_STB=%s", dut.core_stb.value)
@@ -185,7 +185,7 @@ def show_signals_of_interest(dut, TWO_MEMORIES):
         dut._log.info("CORE_DATA_IN=%s", dut.core_data_in.value)
         dut._log.info("CORE_WE=%s", dut.core_we.value)
         dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
-        dut._log.info("CORE_WSTRB=%s", dut.core_wstrb.value)
+        dut._log.info("CORE_SEL=%s", dut.core_sel.value)
         dut._log.info("")
 
 async def wait_cycles(signal, num_cycles):
@@ -296,6 +296,7 @@ async def execution_trace(dut):
         old_regfile[i] = reg_file[i].value
 
    # Main simulation loop
+    successful_simulation = False
     for _ in range(SIMULATION_TIMEOUT_CYCLES):
         show_signals_of_interest(dut, TWO_MEMORIES)
         
@@ -310,6 +311,7 @@ async def execution_trace(dut):
             stop_condition = memory[tohost_addr] == 1
         if stop_condition:
             dut._log.info("ToHost write detected. Stop simulation.")
+            successful_simulation = True
             break
 
         for i in available_regs:
@@ -318,9 +320,10 @@ async def execution_trace(dut):
         await RisingEdge(dut.sys_clk)
         await ReadWrite() # Wait for the memory to react
 
+    assert successful_simulation, "Simulation timed out before reaching ToHost write."
+
     # finished simulation, write trace to file
-    src_path = os.getenv("SRCPATH")
-    processor_name = os.path.basename(src_path.rstrip('/'))
+    processor_name = os.getenv("PROC_NAME")
 
     output_dir = os.environ.get("OUTPUT_DIR")
     os.makedirs(output_dir, exist_ok=True)
@@ -349,7 +352,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run a ELF binaries and collect the fragmented execution trace.")
     parser.add_argument("--makefile","-m", required=True, type=str, help="Path to the makefile to use.")
-    parser.add_argument("--src_path","-s", required=True, type=str, help="Path to the processor repository (used in the makefile).") # To be changed. Makefile should have absolute paths
     
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--elf_file", "-e", type=str, help="Path to a single ELF file to execute.")
@@ -361,7 +363,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     makefile = args.makefile
-    src_path = args.src_path
     elf_file = args.elf_file
     elf_folder = args.elf_folder
     reg_file = args.reg_file
@@ -378,10 +379,11 @@ if __name__ == "__main__":
     # Prepare environment variables
     env = os.environ.copy()
     env['PYTHONPATH'] = exec_trace_path
-    env['MODULE'] = 'exec_trace'
-    env['SRCPATH'] = src_path
+    # env['MODULE'] = "exec_trace"
     env['REGFILE'] = args.reg_file
     env['OUTPUT_DIR'] = output_dir
+    processor_name = os.path.splitext(os.path.basename(makefile))[0]
+    env['PROC_NAME'] = processor_name
     
     # Force colored output for tools that support it
     env['FORCE_COLOR'] = '1'
@@ -389,10 +391,11 @@ if __name__ == "__main__":
     env['TERM'] = 'xterm-256color'
     
     clean_command = ["make", "-f", makefile, "clean"]
-
-    make_command = ["make", "-f", makefile, "WAVES=1"]
+    # In-line variables override makefile.
+    # Could not use env["MODULE"]="exec_trace" because make would not pick it up
+    make_command = ["make", "-f", makefile, "MODULE=exec_trace"]
     try:
-        if args.elf_folder:
+        if args.elf_folder: # batch mode
             subprocess.run(clean_command, check=True, env=env)
             for test_file in os.listdir(elf_folder):
                 elf_file = os.path.join(elf_folder, test_file)
