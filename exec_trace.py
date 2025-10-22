@@ -170,7 +170,6 @@ def show_signals_of_interest(dut, TWO_MEMORIES):
         dut._log.info("CORE_DATA_IN=%x", dut.core_data_in.value)
         dut._log.info("CORE_WE=%s", dut.core_we.value)
         dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
-        dut._log.info("DATA_MEM_CYC=%s", dut.data_mem_cyc.value)
         dut._log.info("DATA_MEM_STB=%s", dut.data_mem_stb.value)
         dut._log.info("DATA_MEM_ADDR=%s", dut.data_mem_addr.value)
         dut._log.info("DATA_MEM_DATA_IN=%s", dut.data_mem_data_in.value)
