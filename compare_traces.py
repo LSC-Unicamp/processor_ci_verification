@@ -48,19 +48,22 @@ def is_fence_instruction(instruction):
     fence_op_code = instruction & 0b1111111 == 0b0001111 # fence
     return fence_op_code
 
-def reorder_superscalar_commits(spike_entry, regfile_commits, regfile_commits_index):
+def reorder_superscalar_commits(spike_entry, next_spike_entry, regfile_commits, regfile_commits_index):
     """
     Look for the next commits in case the superscalar processor committed out of order.
-    If it does not find a match within the next 4 commits, nothing is changed.
+    If it does not find a match with the next commit, nothing is changed.
+    It checks if the swap is valid by looking at the next spike entry as well.
     """
     next_index = regfile_commits_index + 1
-    while next_index < regfile_commits_index + 4 and next_index < len(regfile_commits):
+    if next_index < len(regfile_commits):
         next_commit = regfile_commits[next_index]
-        if next_commit[0] == spike_entry["target_reg"] and next_commit[1] == spike_entry["reg_val"]:
-            # Swap the commits to bring the matching one to the current index
+
+        if (next_commit[0] == spike_entry["target_reg"] and next_commit[1] == spike_entry["reg_val"] and
+            regfile_commits[regfile_commits_index][0] == next_spike_entry["target_reg"] and regfile_commits[regfile_commits_index][1] == next_spike_entry["reg_val"]
+            ):
+            # Swap the commits
             regfile_commits[regfile_commits_index], regfile_commits[next_index] = regfile_commits[next_index], regfile_commits[regfile_commits_index]
-            return
-        next_index += 1
+    return
 
 def generate_final_trace(spike_trace, dut_trace, elf_name):
     """
@@ -76,11 +79,14 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
     regfile_commits_index = 0
     memory_accesses_index = 0
     dut_trace_final = []
-    spike_regfile = [0] * 32
+    spike_regfile = [None] * 32 # when first write is zero, it won't count as a repeated write
     spike_index = 0
     while spike_index < len(spike_trace):
 
         spike_entry = spike_trace[spike_index]
+        
+        if spike_index + 1 < len(spike_trace):
+            next_spike_entry = spike_trace[spike_index+1] # for reordering superscalar commits
 
         # dut_trace was shorter than spike_trace, probably a bug
         if fetches_index >= len(dut_trace["fetches"]):
@@ -98,9 +104,9 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
             repeated_write = spike_regfile[spike_entry["target_reg"]] == spike_entry["reg_val"]
 
         speculative_commit = False
-        if repeated_write:
-            speculative_commit = True
-            dut_trace["regfile_commits"].insert(regfile_commits_index, [spike_entry["target_reg"], spike_entry["reg_val"]])
+        # if repeated_write:
+        #     speculative_commit = True
+        #     dut_trace["regfile_commits"].insert(regfile_commits_index, [spike_entry["target_reg"], spike_entry["reg_val"]])
             
 
         if (spike_entry["pc"] != dut_trace["fetches"][fetches_index][0]
@@ -142,7 +148,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
                         break
                     
-                    reorder_superscalar_commits(spike_entry, dut_trace["regfile_commits"], regfile_commits_index)
+                    reorder_superscalar_commits(spike_entry, next_spike_entry, dut_trace["regfile_commits"], regfile_commits_index)
 
                     dut_trace_final.append({
                         "pc": dut_trace["fetches"][fetches_index][0],
@@ -170,14 +176,16 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                 # Exract only the bytes that were actually stored (considering write strobe)
                 # Spike address points to the specific bytes to be stored
                 byte_shift = 8*(spike_entry["mem_addr"] & 0b11)
-                aux_dut_mem_val = dut_trace["memory_accesses"][memory_accesses_index][1]
                 if is_store_word_instruction(dut_trace["fetches"][fetches_index][1]):
-                    aux_mem_val = (aux_dut_mem_val >> byte_shift)
+                    aux_mem_val = (dut_trace["memory_accesses"][memory_accesses_index][1] >> byte_shift)
                 elif is_store_half_instruction(dut_trace["fetches"][fetches_index][1]):
-                    aux_mem_val = (aux_dut_mem_val >> byte_shift) & 0xFFFF
+                    aux_mem_val = (dut_trace["memory_accesses"][memory_accesses_index][1] >> byte_shift) & 0xFFFF
                 elif is_store_byte_instruction(dut_trace["fetches"][fetches_index][1]):
-                    aux_mem_val = (aux_dut_mem_val >> byte_shift) & 0xFF
+                    aux_mem_val = (dut_trace["memory_accesses"][memory_accesses_index][1] >> byte_shift) & 0xFF
 
+                # align dut address to be compatible with spike
+                dut_trace["memory_accesses"][memory_accesses_index][0] = dut_trace["memory_accesses"][memory_accesses_index][0] + (spike_entry["mem_addr"] & 0b11)
+                
                 dut_trace_final.append({
                     "pc": dut_trace["fetches"][fetches_index][0],
                     "instr": dut_trace["fetches"][fetches_index][1],
@@ -223,7 +231,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                         print(f"{elf_name} trace ended before expected (out of regfile_commits).")
                         break
 
-                    reorder_superscalar_commits(spike_entry, dut_trace["regfile_commits"], regfile_commits_index)
+                    reorder_superscalar_commits(spike_entry, next_spike_entry, dut_trace["regfile_commits"], regfile_commits_index)
 
                     dut_trace_final.append({
                         "pc": dut_trace["fetches"][fetches_index][0],
