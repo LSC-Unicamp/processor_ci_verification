@@ -15,7 +15,7 @@ import re
 import elf_reader
 
 # Simulation parameters
-REGFILE_ARRAY_AVAILABLE = True
+REGFILE_ARRAY_AVAILABLE = False
 RIGHT_JUSTIFIED = False
 MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
 SIMULATION_TIMEOUT_CYCLES = 30000
@@ -292,9 +292,11 @@ async def execution_trace(dut):
             except (IndexError, AttributeError):
                 # Register doesn't exist, skip it
                 continue
+        
+        # Cocotb is unable to initialize the register file, not used
+        # for i in available_regs:
+        #     reg_file[i].value = 0
 
-        for i in available_regs:
-            reg_file[i].value = 0
     # Use regfile interface, instead
     else:
         reg_file_json_path = os.environ.get("REGFILE_JSON")
@@ -303,7 +305,7 @@ async def execution_trace(dut):
         reg_file_write_enable = resolve_path(dut, regfile_json_data['regfile_interface']['write_enable'])
         reg_file_write_addr = resolve_path(dut, regfile_json_data['regfile_interface']['write_addr'])
         reg_file_write_data = resolve_path(dut, regfile_json_data['regfile_interface']['write_data'])
-        # initialize with zero (best guess)
+        
         # regfile is now a python object, mimetizing the cocotb handle
         class Register:
             def __init__(self, value=0):
@@ -320,9 +322,10 @@ async def execution_trace(dut):
     await ReadWrite()  # Wait for the signals to propagate after reset
 
     # This is used to check for register file changes
+    # Initialize with DUT's values
     old_regfile = {}
     for i in available_regs:
-        old_regfile[i] = reg_file[i].value
+        old_regfile[i] =  reg_file[i].value
 
     show_signals_of_interest(dut, TWO_MEMORIES)
 
@@ -336,7 +339,7 @@ async def execution_trace(dut):
                     regfile_commits.append((i, reg_file[i].value.integer))
         else:
             # Use regfile interface to detect writes
-            if reg_file_write_enable.value == 1:
+            if reg_file_write_enable.value == 1 and reg_file_write_addr.value.integer != 0:
                 write_addr = reg_file_write_addr.value.integer
                 write_data = reg_file_write_data.value.integer
                 reg_file[write_addr].value = write_data
