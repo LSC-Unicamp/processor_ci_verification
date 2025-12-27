@@ -92,6 +92,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
             spike_entry["mem_addr"] = None
 
         # repeated writes cannot be detected. Mark them as speculative commits
+        # this only work for the array version. harv does not support repeated writes
         repeated_write = False
         if spike_entry["target_reg"] is not None:
             repeated_write = spike_regfile[spike_entry["target_reg"]] == spike_entry["reg_val"]

@@ -15,9 +15,10 @@ import re
 import elf_reader
 
 # Simulation parameters
+REGFILE_ARRAY_AVAILABLE = True
 RIGHT_JUSTIFIED = False
 MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
-SIMULATION_TIMEOUT_CYCLES = 5000
+SIMULATION_TIMEOUT_CYCLES = 30000
 
 
 async def instruction_memory_model(dut, memory, fetches, start_of_text_section, end_of_text_section):
@@ -168,7 +169,6 @@ def show_signals_of_interest(dut, TWO_MEMORIES):
         dut._log.info("CORE_ACK=%s", dut.core_ack.value)
         dut._log.info("CORE_ADDR=%x", dut.core_addr.value)
         dut._log.info("CORE_DATA_IN=%x", dut.core_data_in.value)
-        dut._log.info("CORE_WE=%s", dut.core_we.value)
         dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
         dut._log.info("DATA_MEM_STB=%s", dut.data_mem_stb.value)
         dut._log.info("DATA_MEM_ADDR=%s", dut.data_mem_addr.value)
@@ -177,10 +177,14 @@ def show_signals_of_interest(dut, TWO_MEMORIES):
         dut._log.info("DATA_MEM_DATA_OUT=%s", dut.data_mem_data_out.value)
         dut._log.info("DATA_MEM_SEL=%s", dut.data_mem_sel.value)
         dut._log.info("")
+        # for i in range(32):
+        #     reg_value = dut.Processor.regFile.REGISTERS[i].value
+        #     dut._log.info("REG[%02d]=%x", i, reg_value)
     else:
         dut._log.info("CORE_STB=%s", dut.core_stb.value)
-        dut._log.info("CORE_ADDR=%s", dut.core_addr.value)
-        dut._log.info("CORE_DATA_IN=%s", dut.core_data_in.value)
+        dut._log.info("CORE_ACK=%s", dut.core_ack.value)
+        dut._log.info("CORE_ADDR=%x", dut.core_addr.value)
+        dut._log.info("CORE_DATA_IN=%x", dut.core_data_in.value)
         dut._log.info("CORE_WE=%s", dut.core_we.value)
         dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
         dut._log.info("CORE_SEL=%s", dut.core_sel.value)
@@ -219,6 +223,14 @@ async def debug_print(dut):
         dut._log.info("instr_resp=%s", dut.instr_resp.value)
         dut._log.info("")
 
+async def custom_clock(clk):
+    while True:
+        # Clock low
+        clk.value = 0
+        await Timer(0.5, units="ns")
+        clk.value = 1
+        # Clock high
+        await Timer(0.5, units="ns")
 
 
 @cocotb.test()
@@ -233,7 +245,8 @@ async def execution_trace(dut):
     processor_name = os.environ.get("PROC_NAME")
     dut._log.info(f"Initializing trace execution for {processor_name}...")
 
-    cocotb.start_soon(Clock(dut.sys_clk, 1, units="ns").start())
+    # cocotb.start_soon(Clock(dut.sys_clk, 1, units="ns", start_high=False).start())
+    cocotb.start_soon(custom_clock(dut.sys_clk))
 
     dut.core_data_in.value = 0
     dut.rst_n.value = 0
@@ -241,7 +254,6 @@ async def execution_trace(dut):
 
     # Start memory, reset register file, get tohost symbol ###########################################################
     TWO_MEMORIES = os.getenv("TWO_MEMORIES", "False").lower() == "true"
-    print( f"TWO_MEMORIES = {TWO_MEMORIES}" ) # debug
     if TWO_MEMORIES:
         # Initialize instruction memory from ELF
         filename = os.environ.get("ELF")
@@ -267,21 +279,39 @@ async def execution_trace(dut):
     tohost_addr_raw = elf_reader.get_tohost_address(filename)
     tohost_addr = (tohost_addr_raw // 4) % MEM_SIZE
 
-    # First, determine which registers exist by checking if they can be accessed
-    # rvx, for example, does not have x0
-    reg_file = resolve_path(dut, os.environ.get("REGFILE"))
-    available_regs = []
-    for i in range(32):
-        try:
-            # Test if register exists by trying to access it
-            _ = reg_file[i].value
-            available_regs.append(i)
-        except (IndexError, AttributeError):
-            # Register doesn't exist, skip it
-            continue
+    if REGFILE_ARRAY_AVAILABLE:
+        # First, determine which registers exist by checking if they can be accessed
+        # rvx, for example, does not have x0
+        reg_file = resolve_path(dut, os.environ.get("REGFILE"))
+        available_regs = []
+        for i in range(32):
+            try:
+                # Test if register exists by trying to access it
+                _ = reg_file[i].value
+                available_regs.append(i)
+            except (IndexError, AttributeError):
+                # Register doesn't exist, skip it
+                continue
 
-    for i in available_regs:
-        reg_file[i].value = 0
+        for i in available_regs:
+            reg_file[i].value = 0
+    # Use regfile interface, instead
+    else:
+        reg_file_json_path = os.environ.get("REGFILE_JSON")
+        with open(reg_file_json_path, 'r', encoding='utf-8') as f:
+            regfile_json_data = json.load(f)
+        reg_file_write_enable = resolve_path(dut, regfile_json_data['regfile_interface']['write_enable'])
+        reg_file_write_addr = resolve_path(dut, regfile_json_data['regfile_interface']['write_addr'])
+        reg_file_write_data = resolve_path(dut, regfile_json_data['regfile_interface']['write_data'])
+        # initialize with zero (best guess)
+        # regfile is now a python object, mimetizing the cocotb handle
+        class Register:
+            def __init__(self, value=0):
+                self.value = value
+        reg_file = {i: Register(0) for i in range(32)}
+
+        # assume all registers are available
+        available_regs = list(range(32))
 
     ##############################################################################################
 
@@ -294,14 +324,23 @@ async def execution_trace(dut):
     for i in available_regs:
         old_regfile[i] = reg_file[i].value
 
+    show_signals_of_interest(dut, TWO_MEMORIES)
+
     # Main simulation loop
     successful_simulation = False
     for _ in range(SIMULATION_TIMEOUT_CYCLES):
-        show_signals_of_interest(dut, TWO_MEMORIES)
         
-        for i in available_regs:
-            if reg_file[i].value != old_regfile[i]:
-                regfile_commits.append((i, reg_file[i].value.integer))
+        if REGFILE_ARRAY_AVAILABLE:
+            for i in available_regs:
+                if reg_file[i].value != old_regfile[i]:
+                    regfile_commits.append((i, reg_file[i].value.integer))
+        else:
+            # Use regfile interface to detect writes
+            if reg_file_write_enable.value == 1:
+                write_addr = reg_file_write_addr.value.integer
+                write_data = reg_file_write_data.value.integer
+                reg_file[write_addr].value = write_data
+                regfile_commits.append((write_addr, write_data))
 
         stop_condition = False
         if TWO_MEMORIES:
@@ -318,8 +357,8 @@ async def execution_trace(dut):
 
         await RisingEdge(dut.sys_clk)
         await ReadWrite() # Wait for the memory to react
+        show_signals_of_interest(dut, TWO_MEMORIES)
 
-    assert successful_simulation, "Simulation timed out before reaching ToHost write."
 
     # finished simulation, write trace to file
     processor_name = os.getenv("PROC_NAME")
@@ -344,6 +383,7 @@ async def execution_trace(dut):
         json_str = re.sub(r'\[\s*([0-9]+),\s*([0-9]+)\s*\]', r'[\1,\2]', json_str)
         trace_file.write(json_str)
 
+    assert successful_simulation, "Simulation timed out before reaching ToHost write."
 
 # Since cocotb cannot receive arguments,
 # __main__ reads arguments and writes them to a fixed-location, temporary file
@@ -379,9 +419,10 @@ if __name__ == "__main__":
     env = os.environ.copy()
     env['PYTHONPATH'] = exec_trace_path
     # env['MODULE'] = "exec_trace"
+    env['REGFILE_JSON'] = os.path.abspath(args.reg_file_json)
     with open(os.path.abspath(args.reg_file_json), 'r', encoding='utf-8') as f:
         regfile_json_data = json.load(f)
-    reg_file = regfile_json_data['regfile_candidates'][0]
+    reg_file = (regfile_json_data.get('regfile_candidates') or [""])[0]
     env['REGFILE'] = reg_file
     env['OUTPUT_DIR'] = output_dir
     processor_name = os.path.splitext(os.path.basename(makefile))[0]
