@@ -2,11 +2,6 @@ import argparse
 import json
 import os
 
-# Some processor access only word-aligned addresses, while Spike provides the exact address
-# This flag makes the comparison ignore the two least significant bits of store addresses and align them to word boundaries
-# Needed this for tinyriscv
-WORD_BOUNDARY_STORES = False
-
 def is_load_instruction(instruction):
     load_op_code = instruction & 0b1111111 == 0b0000011 # lb, lh, lw, lbu, lhu
     return load_op_code
@@ -79,7 +74,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
     regfile_commits_index = 0
     memory_accesses_index = 0
     dut_trace_final = []
-    spike_regfile = [None] * 32 # when first write is zero, it won't count as a repeated write
+    spike_regfile = [0] * 32 # CAUTION: sometimes RTL processors do not initialize with zero! This affetcs the commits list.
     spike_index = 0
     while spike_index < len(spike_trace):
 
@@ -104,9 +99,9 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
             repeated_write = spike_regfile[spike_entry["target_reg"]] == spike_entry["reg_val"]
 
         speculative_commit = False
-        # if repeated_write:
-        #     speculative_commit = True
-        #     dut_trace["regfile_commits"].insert(regfile_commits_index, [spike_entry["target_reg"], spike_entry["reg_val"]])
+        if repeated_write:
+            speculative_commit = True
+            dut_trace["regfile_commits"].insert(regfile_commits_index, [spike_entry["target_reg"], spike_entry["reg_val"]])
             
 
         if (spike_entry["pc"] != dut_trace["fetches"][fetches_index][0]
@@ -341,10 +336,6 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
         if spike_entry["instr"] & 0b1111111 == 0b0000011:
             dut_entry["mem_addr"] = None
 
-        # align memory addresses to word boundaries for stores
-        if WORD_BOUNDARY_STORES:
-            if spike_entry["instr"] & 0b1111111 == 0b0100011:
-                spike_entry["mem_addr"] = spike_entry["mem_addr"] & ~0b11
 
         dut_entry = non_speculative_entries[i].copy()
         dut_entry.pop("speculative_fetch", None)  # Remove speculative key if exists
