@@ -91,20 +91,9 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
         # filter memory reads, dut cannot detect memory reads
         if spike_entry["mem_addr"] is not None and spike_entry["mem_val"] is None:
             spike_entry["mem_addr"] = None
-
-        # repeated writes cannot be detected. Mark them as speculative commits
-        # this only work for the array version. harv does not support repeated writes
-        repeated_write = False
-        if spike_entry["target_reg"] is not None:
-            repeated_write = spike_regfile[spike_entry["target_reg"]] == spike_entry["reg_val"]
-
-        speculative_commit = False
-        if repeated_write:
-            speculative_commit = True
-            dut_trace["regfile_commits"].insert(regfile_commits_index, [spike_entry["target_reg"], spike_entry["reg_val"]])
             
-
-        if (spike_entry["pc"] != dut_trace["fetches"][fetches_index][0]
+        # Tolerate odd PCs to help exposing JALR LSB bugs
+        if (spike_entry["pc"] != (dut_trace["fetches"][fetches_index][0] & 0xFFFFFFFE)
             # or spike_entry["instr"] != dut_trace["fetches"][fetches_index][1]
         ):
             # Assume speculative fetch
@@ -116,10 +105,21 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                 "mem_addr": None,
                 "mem_val": None,
                 "speculative_fetch": True,
-                "speculative_commit": speculative_commit
+                "speculative_commit": False
             })
             fetches_index += 1
         else:
+
+            # repeated writes cannot be detected. Mark them as speculative commits
+            # this only work for the array version. harv and cve2, for example, do not support repeated writes
+            speculative_commit = False
+            if spike_entry["target_reg"] is not None:
+                speculative_commit = spike_regfile[spike_entry["target_reg"]] == spike_entry["reg_val"]
+            
+            if speculative_commit:
+                # add new commit
+                dut_trace["regfile_commits"].insert(regfile_commits_index, [spike_entry["target_reg"], spike_entry["reg_val"]])
+
             # Check if the instruction is writing to the x0 register
             # Writes to x0 are not computed
             write_to_zero = (dut_trace["fetches"][fetches_index][1] & 0b00000000000000000000111110000000) == 0
@@ -189,7 +189,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "mem_addr": dut_trace["memory_accesses"][memory_accesses_index][0],
                     "mem_val": aux_mem_val,
                     "speculative_fetch": False,
-                    "speculative_commit": speculative_commit
+                    "speculative_commit": False
                 })
                 fetches_index += 1
                 memory_accesses_index += 1
@@ -203,11 +203,11 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "mem_addr": None,
                     "mem_val": None,
                     "speculative_fetch": False,
-                    "speculative_commit": speculative_commit
+                    "speculative_commit": False
                 })
                 fetches_index += 1
                 spike_index += 1
-            elif is_reg_instruction(dut_trace["fetches"][fetches_index][1]):
+            elif is_reg_instruction(dut_trace["fetches"][fetches_index][1]):               
                 if write_to_zero: # just the fetch
                     dut_trace_final.append({
                         "pc": dut_trace["fetches"][fetches_index][0],
@@ -286,7 +286,7 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                     "mem_addr": None,
                     "mem_val": None,
                     "speculative_fetch": False,
-                    "speculative_commit": speculative_commit
+                    "speculative_commit": False
                 })
                 fetches_index += 1
                 spike_index += 1
