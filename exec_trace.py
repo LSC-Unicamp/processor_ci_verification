@@ -1,3 +1,13 @@
+    ###############################################################################
+    # import debugpy
+    # listen_host, listen_port = debugpy.listen(("localhost", 5678))
+    # print("Waiting for Python debugger attach on {}:{}".format(listen_host, listen_port))
+    # # Suspend execution until debugger attaches
+    # debugpy.wait_for_client()
+    # # Break into debugger for user control
+    # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
+    ###############################################################################
+
 import cocotb
 from cocotb.triggers import Timer, RisingEdge, ReadWrite, ReadOnly, NextTimeStep
 from cocotb.clock import Clock
@@ -15,22 +25,13 @@ import re
 import elf_reader
 
 # Simulation parameters
-REGFILE_ARRAY_AVAILABLE = False
+REGFILE_ARRAY_AVAILABLE = True
 RIGHT_JUSTIFIED = False
 MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
-SIMULATION_TIMEOUT_CYCLES = 30000
+SIMULATION_TIMEOUT_CYCLES = 60000
 
 
 async def instruction_memory_model(dut, memory, fetches, start_of_text_section, end_of_text_section):
-    ###############################################################################
-    # import debugpy
-    # listen_host, listen_port = debugpy.listen(("localhost", 5678))
-    # print("Waiting for Python debugger attach on {}:{}".format(listen_host, listen_port))
-    # # Suspend execution until debugger attaches
-    # debugpy.wait_for_client()
-    # # Break into debugger for user control
-    # breakpoint()  # or debugpy.breakpoint() on 3.6 and below
-    ###############################################################################
     while True:
         await RisingEdge(dut.sys_clk)  
         await ReadWrite() # wait for signals to propagate after the clock edge
@@ -48,7 +49,7 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
                 await NextTimeStep()
                 await ReadWrite()
                 # it is only a fetch if it is reading the .text section
-                if dut.rst_n.value == 1 and raw_addr < end_of_text_section:
+                if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
                 write_value = dut.core_data_out.value.integer
@@ -171,6 +172,7 @@ def show_signals_of_interest(dut, TWO_MEMORIES):
         dut._log.info("CORE_DATA_IN=%x", dut.core_data_in.value)
         dut._log.info("CORE_DATA_OUT=%s", dut.core_data_out.value)
         dut._log.info("DATA_MEM_STB=%s", dut.data_mem_stb.value)
+        dut._log.info("DATA_MEM_ACK=%s", dut.data_mem_ack.value)
         dut._log.info("DATA_MEM_ADDR=%s", dut.data_mem_addr.value)
         dut._log.info("DATA_MEM_DATA_IN=%s", dut.data_mem_data_in.value)
         dut._log.info("DATA_MEM_WE=%s", dut.data_mem_we.value)
@@ -293,9 +295,9 @@ async def execution_trace(dut):
                 # Register doesn't exist, skip it
                 continue
         
-        # Cocotb is unable to initialize the register file, not used
-        # for i in available_regs:
-        #     reg_file[i].value = 0
+        # Cocotb is unable to initialize the register file most of the time. Use with caution
+        for i in available_regs:
+            reg_file[i].value = 0
 
     # Use regfile interface, instead
     else:
@@ -325,7 +327,7 @@ async def execution_trace(dut):
     # Initialize with DUT's values
     old_regfile = {}
     for i in available_regs:
-        old_regfile[i] =  reg_file[i].value
+        old_regfile[i] = reg_file[i].value
 
     show_signals_of_interest(dut, TWO_MEMORIES)
 
@@ -335,7 +337,7 @@ async def execution_trace(dut):
         
         if REGFILE_ARRAY_AVAILABLE:
             for i in available_regs:
-                if reg_file[i].value != old_regfile[i]:
+                if reg_file[i].value != old_regfile[i] and i != 0: # x0 should be always zero
                     regfile_commits.append((i, reg_file[i].value.integer))
         else:
             # Use regfile interface to detect writes
