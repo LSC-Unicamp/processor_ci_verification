@@ -181,3 +181,5 @@ output/
 tmp/
 results.xml
 .vscode/
+fragmented_traces/
+spike_trace/
