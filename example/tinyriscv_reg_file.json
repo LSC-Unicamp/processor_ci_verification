@@ -1,0 +1,14 @@
+{
+    "regfile_candidates": [
+        "processorci_top.Processor.u_regs.regs"
+    ],
+    "regfile_interface": {
+        "read_addr_1": "u_regs.raddr1_i",
+        "read_addr_2": "u_regs.raddr2_i",
+        "read_data_1": "u_regs.rdata1_o",
+        "read_data_2": "u_regs.rdata2_o",
+        "write_enable": "u_regs.we_i",
+        "write_addr": "u_regs.waddr_i",
+        "write_data": "u_regs.wdata_i"
+    }
+}
