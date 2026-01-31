@@ -1,0 +1,6 @@
+{
+    "PROCESSOR_NAME": "tinyriscv",
+    "REGFILE_ARRAY_AVAILABLE": true,
+    "BYTE_ALIGNED_MEMORY_ACCESS": false,
+    "TWO_PORTED_MEMORY_MODEL": true
+}
