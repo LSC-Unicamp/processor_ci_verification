@@ -350,6 +350,20 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
     
     return mismatches
 
+def write_result_json(output_folder, elf_name, mismatches):
+    """
+    Write a structured, machine-readable pass/fail result alongside the
+    <elf_name>.final.json trace, so a caller does not have to grep this
+    script's colored stdout ("Mismatches found for ...") to learn the
+    outcome -- that text is the only place the result was visible before.
+    Best-effort: no output_folder means nothing to write.
+    """
+    if not output_folder:
+        return
+    result = {"elf": elf_name, "mismatches": len(mismatches), "pass": not mismatches}
+    with open(f"{output_folder}/{elf_name}.result.json", "w") as f:
+        json.dump(result, f, indent=2)
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Generate a final DUT trace and then compare it to spike's trace")
@@ -389,6 +403,7 @@ if __name__ == "__main__":
             json.dump(dut_final_trace, f, indent=2)
 
         mismatches = compare_traces(spike_trace, dut_final_trace, elf_name)
+        write_result_json(args.output_folder, elf_name, mismatches)
 
         if mismatches:
             print(f"\033[91mMismatches found for {elf_name}:\033[0m")
@@ -453,6 +468,7 @@ if __name__ == "__main__":
                     json.dump(dut_final_trace, f, indent=2)
 
                 mismatches = compare_traces(spike_trace, dut_final_trace, elf_name)
+                write_result_json(args.output_folder, elf_name, mismatches)
 
                 if mismatches:
                     print(f"\033[91mMismatches found for {elf_name}:\033[0m")
