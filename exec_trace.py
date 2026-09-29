@@ -11,7 +11,6 @@
 import cocotb
 from cocotb.triggers import Timer, RisingEdge, ReadWrite, ReadOnly, NextTimeStep
 from cocotb.clock import Clock
-from cocotb.binary import BinaryValue
 from cocotb.utils import get_sim_time
 
 import os, time
