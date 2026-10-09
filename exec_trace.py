@@ -430,7 +430,7 @@ if __name__ == "__main__":
     
     # Prepare environment variables that will be passed to Cocotb
     env['REGFILE_JSON'] = os.path.abspath(args.reg_file_json)
-    env['MANUAL_FLAGS_JSON'] = os.path.abspath(args.manual_flags_json)
+    env['MANUAL_FLAGS_JSON'] = os.path.abspath(args.manual_flags_json) if args.manual_flags_json else ''
     env['OUTPUT_DIR'] = output_dir
     # ELF_PATH will be set later, in the loop or for single file mode
     
@@ -438,7 +438,7 @@ if __name__ == "__main__":
     clean_command = ["make", "-f", makefile, "clean"]
     # In-line variables override makefile.
     # Could not use env["MODULE"]="exec_trace" because make would not pick it up
-    make_command = ["make", "-f", makefile, "MODULE=exec_trace"]
+    make_command = ["make", "-f", makefile, "MODULE=exec_trace", f"OUTPUT_DIR={output_dir}"]
     try:
         if args.elf_folder: # batch mode
             subprocess.run(clean_command, check=True, env=env)

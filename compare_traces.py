@@ -389,6 +389,8 @@ if __name__ == "__main__":
             json.dump(dut_final_trace, f, indent=2)
 
         mismatches = compare_traces(spike_trace, dut_final_trace, elf_name)
+        with open(f"{args.output_folder}/{elf_name}.result.json", "w") as f:
+            json.dump({"elf": elf_name, "mismatches": len(mismatches), "pass": not mismatches}, f, indent=2)
 
         if mismatches:
             print(f"\033[91mMismatches found for {elf_name}:\033[0m")
@@ -453,6 +455,8 @@ if __name__ == "__main__":
                     json.dump(dut_final_trace, f, indent=2)
 
                 mismatches = compare_traces(spike_trace, dut_final_trace, elf_name)
+                with open(f"{args.output_folder}/{elf_name}.result.json", "w") as f:
+                    json.dump({"elf": elf_name, "mismatches": len(mismatches), "pass": not mismatches}, f, indent=2)
 
                 if mismatches:
                     print(f"\033[91mMismatches found for {elf_name}:\033[0m")
@@ -490,4 +494,3 @@ if __name__ == "__main__":
                 
                 else:
                     print("\033[92mNo mismatches found for", elf_name, "\033[0m")
-
