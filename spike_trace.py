@@ -4,7 +4,9 @@ import os
 import argparse
 import json
 
-def generate_spike_trace(elf_file, output_dir, spike_path="spike"):
+def generate_spike_trace(elf_file, output_dir, spike_path="spike", isa="rv32i",
+                         memory="0x0:0x01FFF000,0x80000000:0x81000000",
+                         extension_library=None, device=None):
     """
     Generates a Spike trace file by executing the given command.
 
@@ -22,8 +24,14 @@ def generate_spike_trace(elf_file, output_dir, spike_path="spike"):
     # For some reason, --instructions=<n> makes spike stop after the last instruction in the elf, even if less than <n>.
     # Do not use the -l option
     print(f"Generating Spike trace for {elf_file} at {trace_file}...")
-    command = f"{spike_path} --isa=rv32i --log-commits -m0x0:0x01FFF000,0x80000000:0x81000000 {elf_file} > {trace_file} 2>&1" # spike writes to stderr
-    subprocess.run(command, shell=True, check=True)
+    command = [spike_path, f"--isa={isa}", "--log-commits", f"-m{memory}"]
+    if extension_library:
+        command.append(f"--extlib={extension_library}")
+    if device:
+        command.append(f"--device={device}")
+    command.append(elf_file)
+    with open(trace_file, "w", encoding="utf-8") as trace:
+        subprocess.run(command, stdout=trace, stderr=subprocess.STDOUT, check=True)
 
     return trace_file
 
@@ -113,18 +121,24 @@ if __name__ == "__main__":
 
     parser.add_argument("--output_dir", "-o", required=True, type=str, help="Directory to save the Spike trace files.")
     parser.add_argument("--spike_path", "-s", type=str, default="spike", help="Path to the Spike binary (default: 'spike').")
+    parser.add_argument("--isa", default="rv32i", help="Spike ISA profile")
+    parser.add_argument("--memory", default="0x0:0x01FFF000,0x80000000:0x81000000", help="Spike memory map")
+    parser.add_argument("--extension-library", help="Spike --extlib path")
+    parser.add_argument("--device", help="Spike --device specification")
     args = parser.parse_args()
 
     if args.elf_folder:
         for test_file in os.listdir(args.elf_folder):
             if test_file.endswith(".elf"):
                 elf_path = os.path.join(args.elf_folder, test_file)
-                trace_file = generate_spike_trace(elf_path, args.output_dir, args.spike_path)
+                trace_file = generate_spike_trace(elf_path, args.output_dir, args.spike_path,
+                                                  args.isa, args.memory, args.extension_library, args.device)
                 trace_dictionary = parse_spike_trace(trace_file)
                 with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
                     json.dump(trace_dictionary, f, indent=2)
     else:
-        trace_file = generate_spike_trace(args.elf_file, args.output_dir, args.spike_path)
+        trace_file = generate_spike_trace(args.elf_file, args.output_dir, args.spike_path,
+                                          args.isa, args.memory, args.extension_library, args.device)
         trace_dictionary = parse_spike_trace(trace_file)
 
         with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
