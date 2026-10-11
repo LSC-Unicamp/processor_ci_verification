@@ -19,6 +19,7 @@ import json
 import argparse
 import subprocess
 import re
+from elftools.elf.elffile import ELFFile
 
 
 # custom functions
@@ -28,6 +29,54 @@ import config_loader
 # Simulation parameters
 MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
 SIMULATION_TIMEOUT_CYCLES = 60000
+
+
+def write_masked_word(memory, index, data, byte_enable):
+    """Apply any four-lane byte enable; return the written word or None."""
+    if not 0 <= byte_enable <= 0b1111:
+        raise ValueError(f"Invalid byte enable: {byte_enable}")
+    if byte_enable == 0:
+        return None
+    mask = sum(0xff << (8 * lane) for lane in range(4) if byte_enable & (1 << lane))
+    word = (memory[index] & ~mask) | (data & mask)
+    memory[index] = word
+    return word
+
+
+def internal_memory_words(elf_path, section_names):
+    """Return byte-addressed words for wrapper-exposed internal RAMs."""
+    words = {}
+    with open(elf_path, "rb") as source:
+        elf = ELFFile(source)
+        for name in section_names:
+            section = elf.get_section_by_name(name)
+            if section is None:
+                continue
+            data = section.data()
+            if section["sh_type"] == "SHT_NOBITS":
+                data = bytes(section["sh_size"])
+            start = int(section["sh_addr"])
+            for offset in range(0, len(data), 4):
+                words[start + offset] = int.from_bytes(
+                    data[offset:offset + 4].ljust(4, b"\0"), "little"
+                )
+    return words
+
+
+async def load_internal_memory(dut, prefix, words):
+    signals = (f"{prefix}_prog_we", f"{prefix}_prog_addr", f"{prefix}_prog_data")
+    if not all(hasattr(dut, name) for name in signals):
+        return False
+    enable, address, data = (getattr(dut, name) for name in signals)
+    enable.value = 0
+    for byte_address, value in sorted(words.items(), reverse=True):
+        address.value = byte_address
+        data.value = value
+        enable.value = 1
+        await RisingEdge(dut.sys_clk)
+        await Timer(0.001, units="ns")
+    enable.value = 0
+    return True
 
 
 async def instruction_memory_model(dut, memory, fetches, start_of_text_section, end_of_text_section):
@@ -80,30 +129,12 @@ async def data_memory_model(dut, memory, mem_access, byte_aligned_memory_access)
             await ReadWrite()
 
             if dut.data_mem_we == 1:
-                # Write operation, depends on write strobe
-                if dut.data_mem_sel.value == "1111":
-                    write_value = dut.data_mem_data_out.value.integer
-                    memory[simulated_addr] = write_value
-                elif dut.data_mem_sel.value == "0011":
-                    write_value = (memory[simulated_addr] & 0xFFFF0000) | (dut.data_mem_data_out.value.integer & 0x0000FFFF)
-                    memory[simulated_addr] = write_value
-                elif dut.data_mem_sel.value == "1100":
-                    write_value = (memory[simulated_addr] & 0x0000FFFF) | (dut.data_mem_data_out.value.integer & 0xFFFF0000)
-                    memory[simulated_addr] = write_value
-                elif dut.data_mem_sel.value == "0001":
-                    write_value = (memory[simulated_addr] & 0xFFFFFF00) | (dut.data_mem_data_out.value.integer & 0x000000FF)
-                    memory[simulated_addr] = write_value
-                elif dut.data_mem_sel.value == "0010":
-                    write_value = (memory[simulated_addr] & 0xFFFF00FF) | (dut.data_mem_data_out.value.integer & 0x0000FF00)
-                    memory[simulated_addr] = write_value
-                elif dut.data_mem_sel.value == "0100":
-                    write_value = (memory[simulated_addr] & 0xFF00FFFF) | (dut.data_mem_data_out.value.integer & 0x00FF0000)
-                    memory[simulated_addr] = write_value
-                elif dut.data_mem_sel.value == "1000":
-                    write_value = (memory[simulated_addr] & 0x00FFFFFF) | (dut.data_mem_data_out.value.integer & 0xFF000000)
-                    memory[simulated_addr] = write_value
-
-                mem_access.append((raw_addr, write_value))
+                write_value = write_masked_word(
+                    memory, simulated_addr, dut.data_mem_data_out.value.integer,
+                    dut.data_mem_sel.value.integer,
+                )
+                if write_value is not None:
+                    mem_access.append((raw_addr, write_value))
 
             dut.data_mem_ack.value = 1
         else:
@@ -133,30 +164,12 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
                 if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
             else:
-                # Write operation, depends on write strobe
-                if dut.core_sel.value == "1111":
-                    write_value = dut.core_data_out.value.integer
-                    memory[simulated_addr] = write_value
-                elif dut.core_sel.value == "0011":
-                    write_value = (memory[simulated_addr] & 0xFFFF0000) | (dut.core_data_out.value.integer & 0x0000FFFF)
-                    memory[simulated_addr] = write_value
-                elif dut.core_sel.value == "1100":
-                    write_value = (memory[simulated_addr] & 0x0000FFFF) | (dut.core_data_out.value.integer & 0xFFFF0000)
-                    memory[simulated_addr] = write_value
-                elif dut.core_sel.value == "0001":
-                    write_value = (memory[simulated_addr] & 0xFFFFFF00) | (dut.core_data_out.value.integer & 0x000000FF)
-                    memory[simulated_addr] = write_value
-                elif dut.core_sel.value == "0010":
-                    write_value = (memory[simulated_addr] & 0xFFFF00FF) | (dut.core_data_out.value.integer & 0x0000FF00)
-                    memory[simulated_addr] = write_value
-                elif dut.core_sel.value == "0100":
-                    write_value = (memory[simulated_addr] & 0xFF00FFFF) | (dut.core_data_out.value.integer & 0x00FF0000)
-                    memory[simulated_addr] = write_value
-                elif dut.core_sel.value == "1000":
-                    write_value = (memory[simulated_addr] & 0x00FFFFFF) | (dut.core_data_out.value.integer & 0xFF000000)
-                    memory[simulated_addr] = write_value
-
-                mem_access.append((raw_addr, write_value))
+                write_value = write_masked_word(
+                    memory, simulated_addr, dut.core_data_out.value.integer,
+                    dut.core_sel.value.integer,
+                )
+                if write_value is not None:
+                    mem_access.append((raw_addr, write_value))
 
             dut.core_ack.value = 1
         else:
@@ -212,6 +225,25 @@ def resolve_path(dut, path: str):
             handle = getattr(handle, part)
     return handle
 
+
+def resolve_vector_group(dut, path):
+    """Resolve Inspector's group of scalar x0..x31 signals as indexed handles."""
+    parent_path, prefix = path.rsplit('.', 1)
+    parent = resolve_path(dut, parent_path)
+    members = {}
+    for name in dir(parent):
+        match = re.fullmatch(rf"{re.escape(prefix)}_?(\d+)(?:_.*)?", name)
+        if match is None:
+            continue
+        index = int(match.group(1))
+        if 0 <= index < 32:
+            members[index] = getattr(parent, name)
+    if len(members) < 31:
+        raise AttributeError(
+            f"{path}: expected at least 31 scalar register signals, found {len(members)}"
+        )
+    return members
+
 # Used only at debbugging
 async def debug_print(dut):
     while True:
@@ -258,6 +290,16 @@ async def execution_trace(dut):
     dut.rst_n.value = 0
     await wait_cycles(dut.sys_clk, 5)
 
+    elf_path = config_data.get('ELF_PATH')
+    internal_program_loaded = await load_internal_memory(
+        dut, "imem", internal_memory_words(elf_path, (".text", ".text.init"))
+    )
+    await load_internal_memory(
+        dut, "dmem", internal_memory_words(
+            elf_path, (".data", ".rodata", ".bss", ".tohost", ".fromhost")
+        )
+    )
+
     # Start memory, reset register file, get tohost symbol ###########################################################
     if config_data.get('TWO_PORTED_MEMORY_MODEL'):
         # Initialize instruction memory from ELF
@@ -284,14 +326,20 @@ async def execution_trace(dut):
     if config_data.get('REGFILE_ARRAY_AVAILABLE'):
         # First, determine which registers exist by checking if they can be accessed
         # rvx, for example, does not have x0
-        reg_file = resolve_path(dut, config_data.get('regfile_candidates')[0])
+        candidate_path = config_data.get('regfile_candidates')[0]
+        selected = config_data.get('selected_regfile') or {}
+        reg_file = (
+            resolve_vector_group(dut, candidate_path)
+            if selected.get('kind') == 'vector_group'
+            else resolve_path(dut, candidate_path)
+        )
         available_regs = []
         for i in range(32):
             try:
                 # Test if register exists by trying to access it
                 _ = reg_file[i].value
                 available_regs.append(i)
-            except (IndexError, AttributeError):
+            except (IndexError, AttributeError, KeyError):
                 # Register doesn't exist, skip it
                 continue
         
@@ -330,7 +378,16 @@ async def execution_trace(dut):
 
     # Main simulation loop
     successful_simulation = False
+    internal_fetches = []
+    last_internal_pc = None
     for _ in range(SIMULATION_TIMEOUT_CYCLES):
+        if internal_program_loaded and hasattr(dut, "imem_fetch_addr"):
+            pc = dut.imem_fetch_addr.value.integer
+            if pc != last_internal_pc:
+                if start_of_text_section <= pc < end_of_text_section:
+                    active_memory = instruction_memory if config_data.get('TWO_PORTED_MEMORY_MODEL') else memory
+                    internal_fetches.append((pc, active_memory[(pc // 4) % MEM_SIZE]))
+                last_internal_pc = pc
         
         if config_data.get('REGFILE_ARRAY_AVAILABLE'):
             for i in available_regs:
@@ -374,6 +431,8 @@ async def execution_trace(dut):
     processor_name = config_data.get('PROCESSOR_NAME')
 
     with open(trace_file_path, "w") as trace_file:
+        if not fetches and internal_fetches:
+            fetches = internal_fetches
         program_name = os.path.basename(config_data.get('ELF_PATH'))
         trace_data = {
             "comment": f"Trace for {program_name} on {processor_name}",
