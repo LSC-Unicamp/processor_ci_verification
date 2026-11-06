@@ -86,31 +86,20 @@ def parse_spike_trace(trace_file):
                     "mem_addr": int(m.group("mem_addr"), 16) if m.group("mem_addr") else None,
                     "mem_val": int(m.group("mem_val"), 16) if m.group("mem_val") else None,
                 }
-                results.append(entry)
-
-    # Remove the debug_rom part where spike starts execution
-    DEBUG_START = 0x08000000
-    DEBUG_SIZE = 0x2000
-    filtered_results = []
-    for entry in results:
-        if entry["pc"] >= DEBUG_START and entry["pc"] < DEBUG_START + DEBUG_SIZE:
-            continue
-        else:
-            filtered_results.append(entry)
+                # Remove the debug ROM part where Spike starts execution
+                # during parsing, without a second full trace-sized list.
+                if not 0x08000000 <= entry["pc"] < 0x08002000:
+                    results.append(entry)
 
     # detect cleanup section of riscv-arch-test
-    index = 0
-    while index < len(filtered_results):
-        if (filtered_results[index]["instr"] == 1048723 and # li ra, 1
-        (filtered_results[index+1]["instr"] == 5015 or      # auipc	t2,0x1
-         filtered_results[index+1]["instr"] == 919)         # auipc	t2,0x0
-        ):
-            break
-        index += 1
-    index += 2 # mark the sw instruction
-    filtered_results = filtered_results[:index+1]
+    for index in range(len(results) - 1):
+        if (results[index]["instr"] == 1048723 and  # li ra, 1
+                results[index + 1]["instr"] in (5015, 919)):
+            # Include the following store when it exists. Bringup workloads
+            # have no riscv-arch-test cleanup marker and keep their full trace.
+            return results[:index + 3]
 
-    return filtered_results
+    return results
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate and parse Spike trace files into a json format.")
@@ -135,11 +124,11 @@ if __name__ == "__main__":
                                                   args.isa, args.memory, args.extension_library, args.device)
                 trace_dictionary = parse_spike_trace(trace_file)
                 with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
-                    json.dump(trace_dictionary, f, indent=2)
+                    json.dump(trace_dictionary, f, separators=(",", ":"))
     else:
         trace_file = generate_spike_trace(args.elf_file, args.output_dir, args.spike_path,
                                           args.isa, args.memory, args.extension_library, args.device)
         trace_dictionary = parse_spike_trace(trace_file)
 
         with open(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(trace_file))[0]}.spike.json"), "w") as f:
-            json.dump(trace_dictionary, f, indent=2)
+            json.dump(trace_dictionary, f, separators=(",", ":"))
