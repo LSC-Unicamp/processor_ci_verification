@@ -25,22 +25,11 @@ from elftools.elf.elffile import ELFFile
 # custom functions
 import elf_reader
 import config_loader
+from memory_bus import read_bus_words, write_bus_words, write_masked_word
 
 # Simulation parameters
 MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
 SIMULATION_TIMEOUT_CYCLES = 60000
-
-
-def write_masked_word(memory, index, data, byte_enable):
-    """Apply any four-lane byte enable; return the written word or None."""
-    if not 0 <= byte_enable <= 0b1111:
-        raise ValueError(f"Invalid byte enable: {byte_enable}")
-    if byte_enable == 0:
-        return None
-    mask = sum(0xff << (8 * lane) for lane in range(4) if byte_enable & (1 << lane))
-    word = (memory[index] & ~mask) | (data & mask)
-    memory[index] = word
-    return word
 
 
 def internal_memory_words(elf_path, section_names):
@@ -118,23 +107,20 @@ async def data_memory_model(dut, memory, mem_access, byte_aligned_memory_access)
             raw_addr = dut.data_mem_addr.value.integer
             simulated_addr = (raw_addr // 4) % MEM_SIZE
 
-            # always read data, even for write operations
-            # each position in inst_memory has 4 bytes
-            if byte_aligned_memory_access: # lb and lh instructions expect data at LSB
-                shift_amount = (raw_addr % 4) * 8
-                dut.data_mem_data_in.value = memory[simulated_addr] >> shift_amount
-            else:
-                dut.data_mem_data_in.value = memory[simulated_addr]
+            bus_width = len(dut.data_mem_data_in)
+            dut.data_mem_data_in.value = read_bus_words(
+                memory, simulated_addr, bus_width,
+                (raw_addr % 4) if byte_aligned_memory_access else 0,
+            )
             await NextTimeStep()
             await ReadWrite()
 
             if dut.data_mem_we == 1:
-                write_value = write_masked_word(
+                for offset, write_value in write_bus_words(
                     memory, simulated_addr, dut.data_mem_data_out.value.integer,
-                    dut.data_mem_sel.value.integer,
-                )
-                if write_value is not None:
-                    mem_access.append((raw_addr, write_value))
+                    dut.data_mem_sel.value.integer, bus_width,
+                ):
+                    mem_access.append((raw_addr + offset, write_value))
 
             dut.data_mem_ack.value = 1
         else:
