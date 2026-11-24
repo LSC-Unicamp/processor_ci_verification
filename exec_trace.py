@@ -77,7 +77,7 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
             raw_addr = dut.core_addr.value.integer
             simulated_addr = (raw_addr // 4) % MEM_SIZE
 
-            if dut.core_we == 0:
+            if dut.core_we.value == 0:
                 # always read data, even for write operations
                 dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
                 
@@ -114,7 +114,7 @@ async def data_memory_model(dut, memory, mem_access, byte_aligned_memory_access)
             await NextTimeStep()
             await ReadWrite()
 
-            if dut.data_mem_we == 1:
+            if dut.data_mem_we.value == 1:
                 for offset, write_value in write_bus_words(
                     memory, simulated_addr, dut.data_mem_data_out.value.integer,
                     dut.data_mem_sel.value.integer, bus_width,
@@ -144,7 +144,7 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
             await NextTimeStep()
             await ReadWrite()
             
-            if dut.core_we == 0:
+            if dut.core_we.value == 0:
                 # it is only a fetch if it is reading the .text section
                 if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
