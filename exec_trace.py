@@ -80,6 +80,8 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
             if dut.core_we.value == 0:
                 # always read data, even for write operations
                 dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
+                if hasattr(dut, "core_data_in_hi"):
+                    dut.core_data_in_hi.value = memory[(simulated_addr + 1) % MEM_SIZE]
                 
                 # wait for reset release
                 await NextTimeStep()
@@ -87,6 +89,8 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
                 # it is only a fetch if it is reading the .text section
                 if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
+                    if hasattr(dut, "core_data_in_hi") and raw_addr + 4 < end_of_text_section:
+                        fetches.append((raw_addr + 4, memory[(simulated_addr + 1) % MEM_SIZE]))
             else:
                 write_value = dut.core_data_out.value.integer
                 memory[simulated_addr] = write_value
@@ -105,6 +109,9 @@ async def data_memory_model(dut, memory, mem_access, byte_aligned_memory_access)
 
             raw_addr = dut.data_mem_addr.value.integer
             simulated_addr = (raw_addr // 4) % MEM_SIZE
+            request_we = dut.data_mem_we.value == 1
+            write_data = dut.data_mem_data_out.value.integer if request_we else 0
+            write_sel = dut.data_mem_sel.value.integer if request_we else 0
 
             bus_width = len(dut.data_mem_data_in)
             dut.data_mem_data_in.value = read_bus_words(
@@ -114,10 +121,9 @@ async def data_memory_model(dut, memory, mem_access, byte_aligned_memory_access)
             await NextTimeStep()
             await ReadWrite()
 
-            if dut.data_mem_we.value == 1:
+            if request_we:
                 for offset, write_value in write_bus_words(
-                    memory, simulated_addr, dut.data_mem_data_out.value.integer,
-                    dut.data_mem_sel.value.integer, bus_width,
+                    memory, simulated_addr, write_data, write_sel, bus_width,
                 ):
                     mem_access.append((raw_addr + offset, write_value))
 
@@ -134,24 +140,30 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
             
             raw_addr = dut.core_addr.value.integer
             simulated_addr = (raw_addr // 4) % MEM_SIZE
+            request_we = dut.core_we.value == 1
+            write_data = dut.core_data_out.value.integer if request_we else 0
+            write_sel = dut.core_sel.value.integer if request_we else 0
 
             if byte_aligned_memory_access: # lb and lh instructions expect data at LSB
                 shift_amount = (raw_addr % 4) * 8
                 dut.core_data_in.value = memory[simulated_addr] >> shift_amount
             else:
                 dut.core_data_in.value = memory[simulated_addr]
+            if hasattr(dut, "core_data_in_hi"):
+                dut.core_data_in_hi.value = memory[(simulated_addr + 1) % MEM_SIZE]
 
             await NextTimeStep()
             await ReadWrite()
             
-            if dut.core_we.value == 0:
+            if not request_we:
                 # it is only a fetch if it is reading the .text section
                 if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
+                    if hasattr(dut, "core_data_in_hi") and raw_addr + 4 < end_of_text_section:
+                        fetches.append((raw_addr + 4, memory[(simulated_addr + 1) % MEM_SIZE]))
             else:
                 write_value = write_masked_word(
-                    memory, simulated_addr, dut.core_data_out.value.integer,
-                    dut.core_sel.value.integer,
+                    memory, simulated_addr, write_data, write_sel,
                 )
                 if write_value is not None:
                     mem_access.append((raw_addr, write_value))
@@ -272,6 +284,8 @@ async def execution_trace(dut):
     cocotb.start_soon(custom_clock(dut.sys_clk))
 
     dut.core_data_in.value = 0
+    if hasattr(dut, "core_data_in_hi"):
+        dut.core_data_in_hi.value = 0
     dut.rst_n.value = 0
     await wait_cycles(dut.sys_clk, 5)
 
@@ -369,9 +383,13 @@ async def execution_trace(dut):
         if internal_program_loaded and hasattr(dut, "imem_fetch_addr"):
             pc = dut.imem_fetch_addr.value.integer
             if pc != last_internal_pc:
-                if start_of_text_section <= pc < end_of_text_section:
-                    active_memory = instruction_memory if config_data.get('TWO_PORTED_MEMORY_MODEL') else memory
-                    internal_fetches.append((pc, active_memory[(pc // 4) % MEM_SIZE]))
+                active_memory = instruction_memory if config_data.get('TWO_PORTED_MEMORY_MODEL') else memory
+                fetch_addresses = [pc]
+                if hasattr(dut, "imem_fetch_addr_hi"):
+                    fetch_addresses.append(dut.imem_fetch_addr_hi.value.integer)
+                for fetch_pc in fetch_addresses:
+                    if start_of_text_section <= fetch_pc < end_of_text_section:
+                        internal_fetches.append((fetch_pc, active_memory[(fetch_pc // 4) % MEM_SIZE]))
                 last_internal_pc = pc
         
         if config_data.get('REGFILE_ARRAY_AVAILABLE'):
