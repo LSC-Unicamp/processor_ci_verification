@@ -539,3 +539,4 @@ if __name__ == "__main__":
         print(e.stdout)
         print("STDERR:")
         print(e.stderr)
+        raise SystemExit(e.returncode) from e
