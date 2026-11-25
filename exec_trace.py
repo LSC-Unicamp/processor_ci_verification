@@ -27,7 +27,7 @@ import config_loader
 from memory_bus import read_bus_words, write_bus_words, write_masked_word
 
 # Simulation parameters
-MEM_SIZE = 524288 # 512K words of 4 bytes = 1024KB
+MEM_SIZE = 524288 # Legacy loader argument; sparse ELF memory has no wrap limit.
 SIMULATION_TIMEOUT_CYCLES = 60000
 
 
@@ -75,13 +75,13 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
             
             raw_addr = dut.core_addr.value.integer
-            simulated_addr = (raw_addr // 4) % MEM_SIZE
+            simulated_addr = raw_addr // 4
 
             if dut.core_we.value == 0:
                 # always read data, even for write operations
                 dut.core_data_in.value = memory[simulated_addr] # each position in inst_memory has 4 bytes
                 if hasattr(dut, "core_data_in_hi"):
-                    dut.core_data_in_hi.value = memory[(simulated_addr + 1) % MEM_SIZE]
+                    dut.core_data_in_hi.value = memory[simulated_addr + 1]
                 
                 # wait for reset release
                 await NextTimeStep()
@@ -90,7 +90,7 @@ async def instruction_memory_model(dut, memory, fetches, start_of_text_section, 
                 if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
                     if hasattr(dut, "core_data_in_hi") and raw_addr + 4 < end_of_text_section:
-                        fetches.append((raw_addr + 4, memory[(simulated_addr + 1) % MEM_SIZE]))
+                        fetches.append((raw_addr + 4, memory[simulated_addr + 1]))
             else:
                 write_value = dut.core_data_out.value.integer
                 memory[simulated_addr] = write_value
@@ -108,7 +108,7 @@ async def data_memory_model(dut, memory, mem_access, byte_aligned_memory_access)
         if dut.data_mem_cyc.value == 1 and dut.data_mem_stb.value == 1: # active transaction
 
             raw_addr = dut.data_mem_addr.value.integer
-            simulated_addr = (raw_addr // 4) % MEM_SIZE
+            simulated_addr = raw_addr // 4
             request_we = dut.data_mem_we.value == 1
             write_data = dut.data_mem_data_out.value.integer if request_we else 0
             write_sel = dut.data_mem_sel.value.integer if request_we else 0
@@ -139,7 +139,7 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
         if dut.core_cyc.value == 1 and dut.core_stb.value == 1: # active transaction
             
             raw_addr = dut.core_addr.value.integer
-            simulated_addr = (raw_addr // 4) % MEM_SIZE
+            simulated_addr = raw_addr // 4
             request_we = dut.core_we.value == 1
             write_data = dut.core_data_out.value.integer if request_we else 0
             write_sel = dut.core_sel.value.integer if request_we else 0
@@ -150,7 +150,7 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
             else:
                 dut.core_data_in.value = memory[simulated_addr]
             if hasattr(dut, "core_data_in_hi"):
-                dut.core_data_in_hi.value = memory[(simulated_addr + 1) % MEM_SIZE]
+                dut.core_data_in_hi.value = memory[simulated_addr + 1]
 
             await NextTimeStep()
             await ReadWrite()
@@ -160,7 +160,7 @@ async def memory_model(dut, memory, fetches, mem_access, start_of_text_section, 
                 if dut.rst_n.value == 1 and raw_addr >= start_of_text_section and raw_addr < end_of_text_section:
                     fetches.append((raw_addr, memory[simulated_addr]))
                     if hasattr(dut, "core_data_in_hi") and raw_addr + 4 < end_of_text_section:
-                        fetches.append((raw_addr + 4, memory[(simulated_addr + 1) % MEM_SIZE]))
+                        fetches.append((raw_addr + 4, memory[simulated_addr + 1]))
             else:
                 write_value = write_masked_word(
                     memory, simulated_addr, write_data, write_sel,
@@ -291,7 +291,7 @@ async def execution_trace(dut):
 
     elf_path = config_data.get('ELF_PATH')
     internal_program_loaded = await load_internal_memory(
-        dut, "imem", internal_memory_words(elf_path, (".text", ".text.init"))
+        dut, "imem", internal_memory_words(elf_path, (".boot", ".vectors", ".text", ".text.init"))
     )
     await load_internal_memory(
         dut, "dmem", internal_memory_words(
@@ -320,7 +320,7 @@ async def execution_trace(dut):
 
     # get tohost symbol to detect end of program
     tohost_addr_raw = elf_reader.get_tohost_address(config_data.get('ELF_PATH'))
-    tohost_addr = (tohost_addr_raw // 4) % MEM_SIZE
+    tohost_addr = tohost_addr_raw // 4
 
     if config_data.get('REGFILE_ARRAY_AVAILABLE'):
         # First, determine which registers exist by checking if they can be accessed
@@ -373,13 +373,18 @@ async def execution_trace(dut):
     for i in available_regs:
         old_regfile[i] = reg_file[i].value
 
-    show_signals_of_interest(dut, config_data.get('TWO_PORTED_MEMORY_MODEL'))
+    verbose_signals = os.environ.get("RVB_NTV_TRACE_SIGNALS") == "1"
+    cycle_limit = int(os.environ.get("RVB_NTV_CYCLE_LIMIT", SIMULATION_TIMEOUT_CYCLES))
+    if not 1 <= cycle_limit <= 10_000_000:
+        raise ValueError("RVB_NTV_CYCLE_LIMIT must be between 1 and 10000000")
+    if verbose_signals:
+        show_signals_of_interest(dut, config_data.get('TWO_PORTED_MEMORY_MODEL'))
 
     # Main simulation loop
     successful_simulation = False
     internal_fetches = []
     last_internal_pc = None
-    for _ in range(SIMULATION_TIMEOUT_CYCLES):
+    for _ in range(cycle_limit):
         if internal_program_loaded and hasattr(dut, "imem_fetch_addr"):
             pc = dut.imem_fetch_addr.value.integer
             if pc != last_internal_pc:
@@ -389,7 +394,7 @@ async def execution_trace(dut):
                     fetch_addresses.append(dut.imem_fetch_addr_hi.value.integer)
                 for fetch_pc in fetch_addresses:
                     if start_of_text_section <= fetch_pc < end_of_text_section:
-                        internal_fetches.append((fetch_pc, active_memory[(fetch_pc // 4) % MEM_SIZE]))
+                        internal_fetches.append((fetch_pc, active_memory[fetch_pc // 4]))
                 last_internal_pc = pc
         
         if config_data.get('REGFILE_ARRAY_AVAILABLE'):
@@ -419,7 +424,8 @@ async def execution_trace(dut):
 
         await RisingEdge(dut.sys_clk)
         await ReadWrite() # Wait for the memory to react
-        show_signals_of_interest(dut, config_data.get('TWO_PORTED_MEMORY_MODEL'))
+        if verbose_signals:
+            show_signals_of_interest(dut, config_data.get('TWO_PORTED_MEMORY_MODEL'))
 
 
     # finished simulation, write trace to file

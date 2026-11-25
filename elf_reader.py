@@ -1,104 +1,65 @@
+"""Read ELF load segments into a sparse, word-addressed simulation memory."""
+
+from collections import defaultdict
+
 from elftools.elf.elffile import ELFFile
 
-def load_memory(memory_size, filename="program.elf"):
-    """
-    Load the memory contents from the .text and .data sections of an ELF file.
-    Args:
-        filename (str): Path to the ELF file.
-    Returns:
-        list: A list of integers representing the memory contents. Each word is 4 bytes.
-    """
-    memory = [0x13] * memory_size # nop
 
-    with open(filename, 'rb') as file:
-        elffile = ELFFile(file)
-
-        text_section = elffile.get_section_by_name('.text')
-        textinit_section = elffile.get_section_by_name('.text.init')
-
-        if not text_section and not textinit_section:
-            raise ValueError("No .text nor .text.init section found in the ELF file.")
-
-        text_data = text_section.data() if text_section else textinit_section.data()
-        text_start_address = text_section['sh_addr'] if text_section else textinit_section['sh_addr']
-
-        pointer = (text_start_address % memory_size) // 4
-        for i in range(0, len(text_data), 4):
-            word = text_data[i:i+4]
-            if len(word) < 4:
-                word = word.ljust(4, b'\x00')
-            memory[pointer] = int.from_bytes(word, byteorder='little')
-            pointer += 1
-
-        data_section = elffile.get_section_by_name('.data')
-        if data_section:
-            data_data = data_section.data()
-            data_start_address = data_section['sh_addr']
-            pointer = (data_start_address % memory_size) // 4
-            for i in range(0, len(data_data), 4):
-                word = data_data[i:i+4]
-                if len(word) < 4:
-                    word = word.ljust(4, b'\x00')
-                memory[pointer] = int.from_bytes(word, byteorder='little')
-                pointer += 1
-
+def _load_segments(filename):
+    memory = defaultdict(int)
+    with open(filename, "rb") as source:
+        elf = ELFFile(source)
+        segments = [segment for segment in elf.iter_segments()
+                    if segment["p_type"] == "PT_LOAD" and segment["p_memsz"]]
+        if not segments:
+            raise ValueError(f"ELF has no loadable segments: {filename}")
+        for segment in segments:
+            address = int(segment["p_paddr"] or segment["p_vaddr"])
+            data = segment.data()
+            size = int(segment["p_memsz"])
+            if len(data) > size:
+                raise ValueError(f"ELF segment exceeds declared memory size: {filename}")
+            # Uninitialized segment bytes read as zero without allocating a
+            # potentially huge stack or BSS range.
+            for offset in range(len(data)):
+                byte_address = address + offset
+                word_address, lane = divmod(byte_address, 4)
+                value = data[offset]
+                mask = 0xff << (lane * 8)
+                memory[word_address] = (memory[word_address] & ~mask) | (value << (lane * 8))
     return memory
 
+
+def load_memory(memory_size, filename="program.elf"):
+    """Load all PT_LOAD segments; ``memory_size`` is retained for callers."""
+    return _load_segments(filename)
+
+
 def load_data_memory(memory_size, filename="program.elf"):
-    data_memory = [0x13] * memory_size # nop
-    with open(filename, 'rb') as file:
-        elffile = ELFFile(file)
+    """The data bus sees the same ELF image on a separate simulation port."""
+    return _load_segments(filename)
 
-        data_section = elffile.get_section_by_name('.data')
-        if data_section:
-            data_data = data_section.data()
-            data_start_address = data_section['sh_addr']
-            pointer = (data_start_address % memory_size) // 4
-            for i in range(0, len(data_data), 4):
-                word = data_data[i:i+4]
-                if len(word) < 4:
-                    word = word.ljust(4, b'\x00')
-                data_memory[pointer] = int.from_bytes(word, byteorder='little')
-                pointer += 1
-
-    return data_memory
 
 def get_tohost_address(filename="program.elf"):
-    """
-    Retrieve the address of the 'tohost' symbol from an ELF file.
-    Args:
-        filename (str): Path to the ELF file.
-    Returns:
-        int: The address of the 'tohost' symbol.
-    """
-    with open(filename, 'rb') as file:
-        elffile = ELFFile(file)
+    with open(filename, "rb") as source:
+        elf = ELFFile(source)
+        symtab = elf.get_section_by_name(".symtab")
+        if symtab is None:
+            raise ValueError("ELF has no symbol table")
+        symbol = symtab.get_symbol_by_name("tohost")
+        if not symbol:
+            raise ValueError("Symbol 'tohost' not found in the ELF file")
+        return int(symbol[0]["st_value"])
 
-        symtab = elffile.get_section_by_name('.symtab')
-        if not symtab:
-            raise ValueError("No symbol table found in the ELF file.")
-
-        tohost_symbol = symtab.get_symbol_by_name('tohost')
-        if not tohost_symbol:
-            raise ValueError("Symbol 'tohost' not found in the ELF file.")
-
-        tohost_addr = tohost_symbol[0]['st_value']
-        return tohost_addr
 
 def get_text_section_addr(filename="program.elf"):
-    """
-    Get the end address of the .text or .text.init section in the ELF file.
-    """
-    with open(filename, 'rb') as file:
-        elffile = ELFFile(file)
-
-        text_section = elffile.get_section_by_name('.text')
-        textinit_section = elffile.get_section_by_name('.text.init')
-        if text_section:
-            start = text_section['sh_addr']
-            end = text_section['sh_addr'] + text_section['sh_size']
-        elif textinit_section:
-            start = textinit_section['sh_addr']
-            end = textinit_section['sh_addr'] + textinit_section['sh_size']
-
-    return start, end
+    """Cover all allocated executable sections, including bringup vectors."""
+    with open(filename, "rb") as source:
+        elf = ELFFile(source)
+        sections = [section for section in elf.iter_sections()
+                    if section["sh_flags"] & 0x4 and section["sh_flags"] & 0x2
+                    and section["sh_size"]]
+        if not sections:
+            raise ValueError("ELF has no allocated executable section")
+        return (min(int(section["sh_addr"]) for section in sections),
+                max(int(section["sh_addr"] + section["sh_size"]) for section in sections))

@@ -35,7 +35,8 @@ def is_reg_instruction(instruction):
     reg_opcode = (  op_code == 0b0110111 or # lui
                     op_code == 0b0010111 or # auipc 
                     op_code == 0b0010011 or # addi, slti, sltiu, xori, ori, andi, slli, srli, srai
-                    op_code == 0b0110011    # add, sub, sll, slt, sltu, xor, srl, sra, or, and 
+                    op_code == 0b0110011 or # add, sub, sll, slt, sltu, xor, srl, sra, or, and
+                    (op_code == 0b1110011 and (instruction >> 12) & 0b111 != 0) # CSR operations
                 )
     return reg_opcode
 
@@ -49,6 +50,8 @@ def reorder_superscalar_commits(spike_entry, next_spike_entry, regfile_commits, 
     If it does not find a match with the next commit, nothing is changed.
     It checks if the swap is valid by looking at the next spike entry as well.
     """
+    if next_spike_entry is None:
+        return
     next_index = regfile_commits_index + 1
     if next_index < len(regfile_commits):
         next_commit = regfile_commits[next_index]
@@ -80,8 +83,8 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
 
         spike_entry = spike_trace[spike_index]
         
-        if spike_index + 1 < len(spike_trace):
-            next_spike_entry = spike_trace[spike_index+1] # for reordering superscalar commits
+        next_spike_entry = (spike_trace[spike_index+1]
+                            if spike_index + 1 < len(spike_trace) else None)
 
         # dut_trace was shorter than spike_trace, probably a bug
         if fetches_index >= len(dut_trace["fetches"]):
@@ -178,15 +181,18 @@ def generate_final_trace(spike_trace, dut_trace, elf_name):
                 elif is_store_byte_instruction(dut_trace["fetches"][fetches_index][1]):
                     aux_mem_val = (dut_trace["memory_accesses"][memory_accesses_index][1] >> byte_shift) & 0xFF
 
-                # align dut address to be compatible with spike
-                dut_trace["memory_accesses"][memory_accesses_index][0] = dut_trace["memory_accesses"][memory_accesses_index][0] + (spike_entry["mem_addr"] & 0b11)
+                # Some wrappers report the addressed byte while others expose
+                # the aligned bus word. Only the latter needs the byte lane.
+                bus_addr = dut_trace["memory_accesses"][memory_accesses_index][0]
+                actual_addr = (bus_addr + (spike_entry["mem_addr"] & 0b11)
+                               if bus_addr & 0b11 == 0 else bus_addr)
                 
                 dut_trace_final.append({
                     "pc": dut_trace["fetches"][fetches_index][0],
                     "instr": dut_trace["fetches"][fetches_index][1],
                     "target_reg": None,
                     "reg_val": None,
-                    "mem_addr": dut_trace["memory_accesses"][memory_accesses_index][0],
+                    "mem_addr": actual_addr,
                     "mem_val": aux_mem_val,
                     "speculative_fetch": False,
                     "speculative_commit": False
@@ -316,7 +322,7 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
     mismatches = []
     
     for i in range(len(spike_trace)):
-        spike_entry = spike_trace[i]
+        spike_entry = spike_trace[i].copy()
 
         if i >= len(non_speculative_entries):
             print(f"Comparison of {elf_name} ended before expected (out of dut entries).")
@@ -332,14 +338,17 @@ def compare_traces(spike_trace, dut_final_trace, elf_name):
                                "dut": empty_entry})
             break
 
-        # DUT final trace does not show memory address for load instructions
-        if spike_entry["instr"] & 0b1111111 == 0b0000011:
-            dut_entry["mem_addr"] = None
-
-
         dut_entry = non_speculative_entries[i].copy()
         dut_entry.pop("speculative_fetch", None)  # Remove speculative key if exists
         dut_entry.pop("speculative_commit", None)
+        # Some wrappers expose the low fetch-address bit as a handshake flag.
+        # The assembler PC is still even; the matching step uses the same mask.
+        if dut_entry["pc"] is not None:
+            dut_entry["pc"] &= ~1
+        # Loads are observed through register commits, not memory reads.
+        if spike_entry["instr"] & 0b1111111 == 0b0000011:
+            spike_entry["mem_addr"] = None
+            dut_entry["mem_addr"] = None
 
         # Compare the spike entry with the DUT entry
         if spike_entry != dut_entry:

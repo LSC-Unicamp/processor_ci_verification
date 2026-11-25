@@ -1,8 +1,10 @@
-"""Word-addressed memory operations for wrapper data buses.
+"""Word-addressed memory operations for wrapper data buses."""
 
-The host memory stays a list of 32-bit words. Wide vector transactions pack
-consecutive words in little-endian lane order, matching the wrapper memory.
-"""
+
+def _index(memory, word):
+    # Small list fixtures retain their historical circular addressing. Real
+    # ELF memories are sparse mappings keyed by the full physical word address.
+    return word % len(memory) if isinstance(memory, list) else word
 
 
 def write_masked_word(memory, index, data, byte_enable):
@@ -21,7 +23,7 @@ def read_bus_words(memory, index, width, byte_offset=0):
     if width < 32 or width % 32:
         raise ValueError(f"Invalid data bus width: {width}")
     value = sum(
-        memory[(index + lane) % len(memory)] << (32 * lane)
+        memory[_index(memory, index + lane)] << (32 * lane)
         for lane in range(width // 32)
     )
     return value >> (8 * byte_offset)
@@ -37,7 +39,7 @@ def write_bus_words(memory, index, data, byte_enable, width):
     for lane in range(width // 32):
         word = write_masked_word(
             memory,
-            (index + lane) % len(memory),
+            _index(memory, index + lane),
             (data >> (lane * 32)) & 0xffffffff,
             (byte_enable >> (lane * 4)) & 0xf,
         )
